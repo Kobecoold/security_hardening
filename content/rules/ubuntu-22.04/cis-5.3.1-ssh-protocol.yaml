@@ -1,0 +1,16 @@
+id: cis-ubuntu-22.04-5.3.1
+os: ubuntu-22.04
+title: Ensure SSH Protocol is set to 2
+benchmark: CIS Ubuntu 22.04 LTS
+level: 1
+description: Ensure Protocol in /etc/ssh/sshd_config is set to 2
+check:
+  bash: |
+    grep -Eq '^Protocol 2' /etc/ssh/sshd_config
+remediation:
+  bash: |
+    sed -i 's/^Protocol .*/Protocol 2/' /etc/ssh/sshd_config
+references:
+  - https://ubuntu.com/security/cis
+controls:
+  - CIS 5.3.1
