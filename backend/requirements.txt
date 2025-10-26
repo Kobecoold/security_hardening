@@ -1,6 +1,6 @@
-fastapi
-uvicorn
-paramiko
-pywinrm
-python-dotenv
-pyyaml
+fastapi==0.104.1
+uvicorn==0.24.0
+pymongo==4.6.0
+paramiko==3.4.0  # Cho SSH
+pywinrm==0.4.3  
+pyyaml==6.0.1    
