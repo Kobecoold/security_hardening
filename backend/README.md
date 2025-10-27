@@ -31,3 +31,45 @@ content/rules/      # Nơi lưu các rule YAML/check script
 ## Tiếp theo
 - Thêm API nhận cấu hình asset, kiểm tra, chạy script Bash/PowerShell từ xa agentless.
 - Triển khai job queue và lưu log kết quả kiểm tra.
+
+
+## Set Up a Virtual Environment
+   ```
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
+## Install Dependencies
+   ```
+   pip install -r requirements.txt
+   ```
+## Run the Application
+   ```
+   uvicorn main:app --reload --host 0.0.0.0 --port 8080
+   ```
+## Test the Audit Engine
+   ```
+   curl -X POST "http://localhost:8080/audit/windows?host=192.168.206.151&username=Window&key_path=~/.ssh/id_ed25519"
+   ```
+## Kết quả
+   ```
+   {
+  	"client_type": "windows",
+  "host": "192.168.206.151",
+  "results": [
+    {
+      "rule_id": "W1.1.1",
+      "description": "Check if SSHD service is running",
+      "command": "sc query sshd",
+      "result": "STATE : 4 RUNNING",
+      "status": "PASS"
+    },
+    {
+      "rule_id": "W1.1.2",
+      "description": "Check if hosts file exists",
+      "command": "dir C:\\Windows\\System32\\drivers\\etc\\hosts",
+      "result": "hosts",
+      "status": "PASS"
+    }
+  ]
+ }
+   ```
