@@ -1,58 +1,90 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 import paramiko
+import yaml
 import os
+from typing import List, Dict
 import json
-from typing import Dict
 
 app = FastAPI(title="Security Hardening Audit Engine")
+
+# Đường dẫn tới file YAML
+RULES_FILE = "/home/server/security_hardening/content/rules/windows-11/cis-windows10-level1.yaml"
+
+def load_rules() -> List[Dict]:
+    """Đọc và parse file YAML chứa các rule"""
+    if not os.path.exists(RULES_FILE):
+        raise FileNotFoundError(f"Rule file not found: {RULES_FILE}")
+    
+    with open(RULES_FILE, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
 
 def ssh_connect(host: str, username: str, key_path: str) -> paramiko.SSHClient:
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    ssh.connect(hostname=host, username=username, key_filename=os.path.expanduser(key_path))
+    ssh.connect(
+        hostname=host,
+        username=username,
+        key_filename=os.path.expanduser(key_path),
+        timeout=10
+    )
     return ssh
 
 def run_audit(ssh: paramiko.SSHClient, rule: Dict) -> Dict:
-    rule_id = rule.get("rule_id")
-    description = rule.get("description")
-    command = rule.get("command")
+    command = rule["check"]["cmd"]
+    expected = rule["check"]["expected"]
     
     stdin, stdout, stderr = ssh.exec_command(command)
-    result = stdout.read().decode().strip() or stderr.read().decode().strip()
-    status = "PASS" if "expected_output" in rule and rule["expected_output"] in result else "FAIL"
+    result = stdout.read().decode().strip()
+    error = stderr.read().decode().strip()
+    
+    if error:
+        output = error
+    else:
+        output = result
+    
+    status = "PASS" if expected in output else "FAIL"
     
     return {
-        "rule_id": rule_id,
-        "description": description,
+        "id": rule["id"],
+        "title": rule["title"],
         "command": command,
-        "result": result,
+        "result": output,
+        "expected": expected,
         "status": status
     }
 
 @app.post("/audit/windows")
-async def audit_windows(host: str, username: str = "Window", key_path: str = "~/.ssh/id_ed25519"):
-    ssh = ssh_connect(host, username, key_path)
-    
-    rules = [
-        {
-            "rule_id": "W1.1.1",
-            "description": "Check if SSHD service is running",
-            "command": "sc query sshd",
-            "expected_output": "STATE              : 4  RUNNING"  # Kiểm tra trạng thái chạy
-        },
-        {
-            "rule_id": "W1.1.2",
-            "description": "Check if hosts file exists",
-            "command": "dir C:\\Windows\\System32\\drivers\\etc\\hosts",
-            "expected_output": "hosts"
+async def audit_windows(
+    host: str,
+    username: str = "Window",
+    key_path: str = "~/.ssh/id_ed25519"
+):
+    try:
+        ssh = ssh_connect(host, username, key_path)
+        rules = load_rules()
+        
+        audit_results = []
+        for rule in rules:
+            if rule.get("os") == "windows-10":
+                audit_results.append(run_audit(ssh, rule))
+        
+        ssh.close()
+        
+        return {
+            "client_type": "windows",
+            "host": host,
+            "benchmark": "CIS Windows 10 Level 1",
+            "total_rules": len(audit_results),
+            "results": audit_results
         }
-    ]
     
-    audit_results = [run_audit(ssh, rule) for rule in rules]
-    ssh.close()
-    
-    return {"client_type": "windows", "host": host, "results": audit_results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080, reload=True)
+# Optional: API để lấy danh sách rule
+@app.get("/rules")
+async def get_rules():
+    try:
+        return {"rules": load_rules()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

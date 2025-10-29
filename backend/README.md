@@ -53,23 +53,27 @@ content/rules/      # Nơi lưu các rule YAML/check script
 ## Kết quả
    ```
    {
-  	"client_type": "windows",
+  "client_type": "windows",
   "host": "192.168.206.151",
+  "benchmark": "CIS Windows 10 Level 1",
+  "total_rules": 2,
   "results": [
     {
-      "rule_id": "W1.1.1",
-      "description": "Check if SSHD service is running",
+      "id": "cis-windows10-18.9.1",
+      "title": "Ensure 'OpenSSH Server' service is running",
       "command": "sc query sshd",
-      "result": "STATE : 4 RUNNING",
+      "result": "...STATE : 4 RUNNING...",
+      "expected": "STATE              : 4  RUNNING",
       "status": "PASS"
     },
     {
-      "rule_id": "W1.1.2",
-      "description": "Check if hosts file exists",
+      "id": "cis-windows10-2.3.11.1",
+      "title": "Ensure 'hosts' file exists and is not empty",
       "command": "dir C:\\Windows\\System32\\drivers\\etc\\hosts",
-      "result": "hosts",
+      "result": "...824 hosts...",
+      "expected": "hosts",
       "status": "PASS"
     }
   ]
- }
+}
    ```
