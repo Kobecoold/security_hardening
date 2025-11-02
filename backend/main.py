@@ -3,7 +3,7 @@ from typing import List, Dict, Optional
 import time
 
 # Import từ các module mới
-from utils import load_rules, load_rules_by_os
+from utils import load_rules, load_rules_by_os, load_remediation_script
 from linux_audit import detect_os, ssh_connect, run_bash_check_stdin, truncate_output
 from windows_audit import run_audit
 
@@ -154,6 +154,58 @@ async def audit_linux_json(
 async def healthz():
     """Health check endpoint."""
     return {"status": "ok"}
+
+
+@app.post("/remediate/linux")
+async def remediate_linux(
+    Host: str = Form(...),
+    Username: str = Form(""),
+    Key_path: Optional[str] = Form("~/.ssh/id_ed25519"),
+    Password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+    Use_sudo: bool = Form(True, description="Phải dùng sudo cho remediation"),
+    Sudo_password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+    Rule_id: str = Form(..., description="ID của rule cần fix, ví dụ: cis-ubuntu-20.04-5.2.4"),
+):
+    """Chạy remediation script để fix rule FAIL."""
+    try:
+        # Kết nối SSH để auto-detect OS
+        ssh = ssh_connect(Host, Username, Key_path or "", password=Password)
+        detected_os = None
+        try:
+            detected_os = detect_os(ssh)
+            if not detected_os:
+                raise HTTPException(status_code=400, detail="Không thể phát hiện OS tự động.")
+        finally:
+            ssh.close()
+        
+        # Load remediation script
+        script_content = load_remediation_script(detected_os, Rule_id)
+        if not script_content:
+            raise HTTPException(status_code=404, detail=f"Không tìm thấy remediation script cho rule: {Rule_id}")
+        
+        # Chạy script
+        ssh_exec = ssh_connect(Host, Username, Key_path or "", password=Password)
+        try:
+            exec_result = run_bash_check_stdin(
+                ssh_exec,
+                script_content,
+                use_sudo=Use_sudo,
+                sudo_password=Sudo_password,
+            )
+        finally:
+            ssh_exec.close()
+        
+        return {
+            "rule_id": Rule_id,
+            "host": Host,
+            "os": detected_os,
+            "status": "FIXED" if exec_result["exit_status"] == 0 else "FAILED",
+            "stdout": exec_result["stdout"],
+            "stderr": exec_result["stderr"],
+            "exit_status": exec_result["exit_status"],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/version")

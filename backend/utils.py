@@ -6,6 +6,7 @@ from typing import List, Dict, Optional
 # Đường dẫn tới thư mục rule gốc (tương đối theo repo)
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 RULES_DIR = os.path.join(REPO_ROOT, "content", "rules")
+SCRIPTS_DIR = os.path.join(REPO_ROOT, "scripts", "remediation")
 
 
 def load_rules() -> List[Dict]:
@@ -70,4 +71,13 @@ def filter_rules(
             continue
         filtered.append(r)
     return filtered
+
+
+def load_remediation_script(os_name: str, rule_id: str) -> Optional[str]:
+    """Load remediation script từ file system theo rule_id."""
+    script_path = os.path.join(SCRIPTS_DIR, os_name, f"{rule_id}.sh")
+    if os.path.exists(script_path):
+        with open(script_path, "r", encoding="utf-8") as f:
+            return f.read()
+    return None
 
