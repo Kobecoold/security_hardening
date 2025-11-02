@@ -8,8 +8,9 @@
 ### Tree
 ```
 backend/            # Python API
-content/rules/      # Rule YAML/script
-scripts/            # Script tiện ích
+content/rules/      # Rule YAML (audit only)
+scripts/            # Script remediation (fix scripts)
+  remediation/      # Chia theo OS: ubuntu-20.04, ubuntu-22.04, debian-12...
 ```
 
 ## Run Backend
