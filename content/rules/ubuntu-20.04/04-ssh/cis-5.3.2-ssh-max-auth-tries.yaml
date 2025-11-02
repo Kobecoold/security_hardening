@@ -1,0 +1,15 @@
+id: cis-ubuntu-20.04-5.3.2
+os: ubuntu-20.04
+title: Ensure SSH MaxAuthTries is set to 4 or less
+benchmark: CIS Ubuntu 20.04 LTS
+level: 1
+description: Set the SSH MaxAuthTries to 4 or less
+needs_sudo: false
+check:
+  bash: |
+    sshd -T 2>/dev/null | grep -i '^maxauthtries' | grep -qE '^([1-4]|4)$'
+references:
+  - https://ubuntu.com/security/cis
+controls:
+  - CIS 5.3.2
+

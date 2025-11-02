@@ -1,0 +1,15 @@
+id: cis-ubuntu-20.04-5.3.5
+os: ubuntu-20.04
+title: Set SSH LogLevel to INFO or VERBOSE
+benchmark: CIS Ubuntu 20.04 LTS
+level: 1
+description: Ensure LogLevel is set to INFO or VERBOSE in /etc/ssh/sshd_config
+needs_sudo: false
+check:
+  bash: |
+    sshd -T 2>/dev/null | grep -i '^loglevel' | grep -qE '^(INFO|VERBOSE)$'
+references:
+  - https://ubuntu.com/security/cis
+controls:
+  - CIS 5.3.5
+

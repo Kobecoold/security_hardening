@@ -1,0 +1,15 @@
+id: cis-ubuntu-20.04-5.3.1
+os: ubuntu-20.04
+title: Ensure SSH Protocol is set to 2
+benchmark: CIS Ubuntu 20.04 LTS
+level: 1
+description: Ensure Protocol in /etc/ssh/sshd_config is set to 2
+needs_sudo: false
+check:
+  bash: |
+    sshd -T 2>/dev/null | grep -i '^protocol' | grep -qi '2'
+references:
+  - https://ubuntu.com/security/cis
+controls:
+  - CIS 5.3.1
+
