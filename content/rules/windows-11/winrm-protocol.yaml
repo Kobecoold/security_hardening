@@ -1,14 +1,18 @@
 id: winrm-cis-windows10-18.9.1.1
 os: windows-10
-title: Ensure WinRM Protocol Security
+title: Ensure WinRM Uses HTTPS with SSL Certificate
 benchmark: CIS Windows 10
 level: 1
-description: Ensure WinRM uses encrypted transport
+description: Ensure WinRM uses encrypted HTTPS transport with existing SSL certificate
 check:
-  winrm: winrm get winrm/config/Service | findstr "AllowUnencrypted"
-  expected: "AllowUnencrypted = false"
+  winrm: |
+    winrm enumerate winrm/config/Listener | findstr "Transport = HTTPS"
+  expected: "Transport = HTTPS"
 remediation:
-  winrm: winrm set winrm/config/service @{AllowUnencrypted="false"}
+  winrm: |
+    echo "Using existing certificate: CN=WIN10"
+    winrm create winrm/config/Listener?Address=*+Transport=HTTPS "@{Hostname='WIN10'; CertificateThumbprint='DF0AF3B3317FB984FD61FB90248B97F1C11BD4FE'}"
+    netsh advfirewall firewall add rule name="WinRM HTTPS" dir=in action=allow protocol=TCP localport=5986
 references:
   - https://learn.microsoft.com/en-us/windows/win32/winrm
 controls:

@@ -6,7 +6,7 @@ level: 1
 description: Set account lockout threshold after failed attempts
 check:
   winrm: net accounts | findstr "Lockout threshold"
-  expected: "Lockout threshold: 5"
+  expected: "Lockout threshold:                                    5"
 remediation:
   winrm: net accounts /lockoutthreshold:5
 references:

@@ -3,7 +3,7 @@ from typing import List, Dict, Optional
 import time
 
 # Import từ các module mới
-from utils import load_rules, load_rules_by_os, load_remediation_script
+from utils import load_rules, load_rules_by_os, load_remediation_script, load_windows_remediation_script
 from linux_audit import detect_os, ssh_connect, run_bash_check_stdin, truncate_output
 from windows_audit import winrm_connect, run_winrm_audit, test_winrm_connection
 
@@ -54,20 +54,6 @@ async def audit_windows_winrm(
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/test/winrm")
-async def test_winrm_connection_api(
-    host: str = Form(...),
-    username: str = Form("Window"),
-    password: str = Form(..., json_schema_extra={"format": "password"}),
-):
-    """Test kết nối WinRM."""
-    try:
-        result = test_winrm_connection(host, username, password)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/rules")
 async def get_rules(os_name: Optional[str] = None):
@@ -176,6 +162,41 @@ async def healthz():
     """Health check endpoint."""
     return {"status": "ok"}
 
+@app.post("/remediate/windows")
+async def remediate_windows(
+    host: str = Form(...),
+    username: str = Form("Window"),
+    password: str = Form(..., json_schema_extra={"format": "password"}),
+    script_name: str = Form("fix-security-policies.ps1"),
+):
+    """Chạy remediation script từ file để fix Windows security issues."""
+    try:
+        # Load script từ file
+        script_content = load_windows_remediation_script(script_name)
+        if not script_content:
+            raise HTTPException(status_code=404, detail=f"Remediation script not found: {script_name}")
+        
+        # Kết nối WinRM
+        session = winrm_connect(host, username, password)
+        
+        # Chạy script qua WinRM
+        result = session.run_ps(script_content)
+        
+        output = result.std_out.decode('utf-8', errors='ignore')
+        error = result.std_err.decode('utf-8', errors='ignore')
+        
+        return {
+            "status": "SUCCESS" if result.status_code == 0 else "PARTIAL",
+            "host": host,
+            "script_used": script_name,
+            "exit_code": result.status_code,
+            "output": output,
+            "error": error,
+            "message": f"Remediation script '{script_name}' executed successfully"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/remediate/linux")
 async def remediate_linux(

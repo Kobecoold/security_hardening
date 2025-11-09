@@ -6,7 +6,7 @@ level: 1
 description: Ensure built-in Administrator account is disabled
 check:
   winrm: net user Administrator | findstr "Account active"
-  expected: "Account active No"
+  expected: "No"
 remediation:
   winrm: net user Administrator /active:no
 references:

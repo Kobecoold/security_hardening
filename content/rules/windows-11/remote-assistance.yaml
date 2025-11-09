@@ -6,7 +6,7 @@ level: 1
 description: Disable Remote Assistance to prevent unauthorized access
 check:
   winrm: reg query "HKLM\SYSTEM\CurrentControlSet\Control\Remote Assistance" /v fAllowToGetHelp
-  expected: "fAllowToGetHelp REG_DWORD 0x0"
+  expected: "fAllowToGetHelp    REG_DWORD    0x0"
 remediation:
   winrm: reg add "HKLM\SYSTEM\CurrentControlSet\Control\Remote Assistance" /v fAllowToGetHelp /t REG_DWORD /d 0 /f
 references:

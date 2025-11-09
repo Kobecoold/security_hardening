@@ -105,3 +105,10 @@ def load_remediation_script(os_name: str, rule_id: str) -> Optional[str]:
             return f.read()
     return None
 
+def load_windows_remediation_script(script_name: str) -> Optional[str]:
+    """Load Windows remediation script từ file system."""
+    script_path = os.path.join(SCRIPTS_DIR, "window-10", script_name)
+    if os.path.exists(script_path):
+        with open(script_path, "r", encoding="utf-8") as f:
+            return f.read()
+    return None
