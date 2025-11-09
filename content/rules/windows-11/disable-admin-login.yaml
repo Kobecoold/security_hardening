@@ -1,0 +1,15 @@
+id: winrm-cis-windows10-2.3.1.1
+os: windows-10
+title: Disable Built-in Administrator Account
+benchmark: CIS Windows 10
+level: 1
+description: Ensure built-in Administrator account is disabled
+check:
+  winrm: net user Administrator | findstr "Account active"
+  expected: "Account active No"
+remediation:
+  winrm: net user Administrator /active:no
+references:
+  - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
+controls:
+  - CIS 2.3.1.1

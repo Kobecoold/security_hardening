@@ -1,0 +1,15 @@
+id: winrm-cis-windows10-18.9.1.1
+os: windows-10
+title: Ensure WinRM Protocol Security
+benchmark: CIS Windows 10
+level: 1
+description: Ensure WinRM uses encrypted transport
+check:
+  winrm: winrm get winrm/config/Service | findstr "AllowUnencrypted"
+  expected: "AllowUnencrypted = false"
+remediation:
+  winrm: winrm set winrm/config/service @{AllowUnencrypted="false"}
+references:
+  - https://learn.microsoft.com/en-us/windows/win32/winrm
+controls:
+  - CIS 18.9.1.1

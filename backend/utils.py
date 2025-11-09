@@ -10,13 +10,37 @@ SCRIPTS_DIR = os.path.join(REPO_ROOT, "scripts", "remediation")
 
 
 def load_rules() -> List[Dict]:
-    """Đọc và parse file YAML (Windows legacy)."""
-    rules_file = os.path.join(RULES_DIR, "windows-11", "cis-windows10-winrm.yaml")
-    if not os.path.exists(rules_file):
-        raise FileNotFoundError(f"Rule file not found: {rules_file}")
+    """Đọc và parse tất cả file YAML trong thư mục windows-11."""
+    windows_dir = os.path.join(RULES_DIR, "windows-11")
+    if not os.path.exists(windows_dir):
+        raise FileNotFoundError(f"Windows rules directory not found: {windows_dir}")
     
-    with open(rules_file, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    rules: List[Dict] = []
+    
+    # Đệ quy tìm tất cả file .yaml/.yml trong thư mục windows-11
+    for root, dirs, files in os.walk(windows_dir):
+        for entry in sorted(files):
+            if not entry.lower().endswith((".yml", ".yaml")):
+                continue
+            file_path = os.path.join(root, entry)
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f)
+                    if data is None:
+                        continue
+                    if isinstance(data, list):
+                        rules.extend(data)
+                    elif isinstance(data, dict):
+                        rules.append(data)
+            except Exception as exc:
+                # Bỏ qua file hỏng nhưng ghi chú lỗi
+                print(f"Warning: Failed to load rules from {file_path}: {exc}")
+                continue
+    
+    if not rules:
+        raise FileNotFoundError(f"No valid rules found in {windows_dir}")
+    
+    return rules
 
 
 def load_rules_by_os(os_name: str) -> List[Dict]:

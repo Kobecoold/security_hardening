@@ -1,0 +1,15 @@
+id: winrm-cis-windows10-10.1.1
+os: windows-10
+title: Enable BitLocker Drive Encryption
+benchmark: CIS Windows 10
+level: 1
+description: Ensure BitLocker is enabled for system drive
+check:
+  winrm: manage-bde -status C: | findstr "Conversion Status"
+  expected: "Fully Encrypted"
+remediation:
+  winrm: 'powershell -Command "Enable-BitLocker -MountPoint C: -RecoveryPasswordProtector -SkipHardwareTest"'
+references:
+  - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
+controls:
+  - CIS 10.1.1
