@@ -11,7 +11,7 @@ SCRIPTS_DIR = os.path.join(REPO_ROOT, "scripts", "remediation")
 
 def load_rules() -> List[Dict]:
     """Đọc và parse file YAML (Windows legacy)."""
-    rules_file = os.path.join(RULES_DIR, "windows-11", "cis-windows10-level1.yaml")
+    rules_file = os.path.join(RULES_DIR, "windows-11", "cis-windows10-winrm.yaml")
     if not os.path.exists(rules_file):
         raise FileNotFoundError(f"Rule file not found: {rules_file}")
     

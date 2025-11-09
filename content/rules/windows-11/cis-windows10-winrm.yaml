@@ -1,0 +1,55 @@
+- id: winrm-cis-windows10-1.1.1
+  os: windows-10
+  title: Ensure WinRM Service is Running
+  benchmark: CIS Windows 10
+  level: 1
+  description: Ensure Windows Remote Management service is running
+  check:
+    winrm: sc query WinRM
+    expected: "STATE              : 4  RUNNING"
+  remediation:
+    winrm: sc config WinRM start= auto && net start WinRM
+  references:
+    - https://learn.microsoft.com/en-us/windows/win32/winrm
+
+- id: winrm-cis-windows10-2.3.1
+  os: windows-10
+  title: Ensure Windows Firewall is Running
+  benchmark: CIS Windows 10
+  level: 1
+  description: Ensure Windows Firewall service is running
+  check:
+    winrm: sc query MpsSvc
+    expected: "STATE              : 4  RUNNING"
+  remediation:
+    winrm: sc config MpsSvc start= auto && net start MpsSvc
+  references:
+    - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
+
+- id: winrm-cis-windows10-18.5.1
+  os: windows-10
+  title: Ensure Remote Desktop Services are Disabled
+  benchmark: CIS Windows 10
+  level: 1
+  description: Ensure Terminal Services and RDP are disabled if not needed
+  check:
+    winrm: sc query TermService
+    expected: "STATE              : 1  STOPPED"
+  remediation:
+    winrm: sc config TermService start= disabled && net stop TermService
+  references:
+    - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
+
+- id: winrm-cis-windows10-2.3.11.1
+  os: windows-10
+  title: Ensure Hosts File Exists
+  benchmark: CIS Windows 10
+  level: 1
+  description: Ensure hosts file exists and contains default entries
+  check:
+    winrm: dir C:\Windows\System32\drivers\etc\hosts
+    expected: "hosts"
+  remediation:
+    winrm: echo 127.0.0.1 localhost > C:\Windows\System32\drivers\etc\hosts
+  references:
+    - https://www.cisecurity.org/benchmark/microsoft_windows_desktop

@@ -5,7 +5,7 @@ import time
 # Import từ các module mới
 from utils import load_rules, load_rules_by_os, load_remediation_script
 from linux_audit import detect_os, ssh_connect, run_bash_check_stdin, truncate_output
-from windows_audit import run_audit
+from windows_audit import winrm_connect, run_winrm_audit, test_winrm_connection
 
 
 app = FastAPI(
@@ -18,32 +18,53 @@ app = FastAPI(
 
 
 @app.post("/audit/windows")
-async def audit_windows(
-    host: str,
-    username: str = "Window",
-    key_path: str = "~/.ssh/id_ed25519",
-    password: Optional[str] = None,
+async def audit_windows_winrm(
+    host: str = Form(...),
+    username: str = Form("Window"),
+    password: str = Form(..., json_schema_extra={"format": "password"}),
 ):
-    """Audit Windows (legacy SSH-based)."""
+    """Audit Windows using WinRM."""
     try:
-        ssh = ssh_connect(host, username, key_path, password=password)
+        # Test kết nối trước
+        connection_test = test_winrm_connection(host, username, password)
+        if connection_test["status"] != "SUCCESS":
+            raise HTTPException(status_code=400, detail=f"WinRM connection failed: {connection_test['error']}")
+        
+        # Kết nối WinRM
+        session = winrm_connect(host, username, password)
+        
+        # Load rules WinRM
         rules = load_rules()
         
+        # Chạy audit
         audit_results = []
         for rule in rules:
-            if rule.get("os") == "windows-10":
-                audit_results.append(run_audit(ssh, rule))
-        
-        ssh.close()
+            audit_results.append(run_winrm_audit(session, rule))
         
         return {
             "client_type": "windows",
+            "protocol": "winrm",
             "host": host,
+            "hostname": connection_test["hostname"],
             "benchmark": "CIS Windows 10 Level 1",
             "total_rules": len(audit_results),
+            "connection_test": connection_test,
             "results": audit_results
         }
     
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/test/winrm")
+async def test_winrm_connection_api(
+    host: str = Form(...),
+    username: str = Form("Window"),
+    password: str = Form(..., json_schema_extra={"format": "password"}),
+):
+    """Test kết nối WinRM."""
+    try:
+        result = test_winrm_connection(host, username, password)
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
