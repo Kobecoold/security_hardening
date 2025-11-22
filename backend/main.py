@@ -5,7 +5,7 @@ import time
 # Import từ các module mới
 from utils import load_rules, load_rules_by_os, load_remediation_script, load_windows_remediation_script
 from linux_audit import detect_os, ssh_connect, run_bash_check_stdin, truncate_output
-from windows_audit import winrm_connect, run_winrm_audit, test_winrm_connection
+from windows_audit import winrm_connect, run_winrm_audit, get_windows_host_info, detect_os_windows
 
 
 app = FastAPI(
@@ -16,6 +16,71 @@ app = FastAPI(
     },
 )
 
+@app.post("/audit/auto-detect")
+async def audit_auto_detect(
+    host: str = Form(...),
+    username: str = Form(""),
+    key_path: Optional[str] = Form(None),
+    password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+    use_sudo: bool = Form(False),
+    sudo_password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+):
+    """Tự động phát hiện OS và chạy audit phù hợp."""
+    try:
+        print(f"🔍 Auto-detecting OS for host: {host}")
+        
+        # Thử SSH trước (Linux)
+        try:
+            print("🔄 Attempting SSH connection...")
+            ssh = ssh_connect(host, username, key_path or "", password=password)
+            detected_os = detect_os(ssh)
+            ssh.close()
+            
+            if detected_os:
+                print(f"✅ Detected Linux OS: {detected_os}")
+                # Chuyển hướng đến audit Linux
+                return await audit_linux_json(
+                    Host=host,
+                    Username=username,
+                    Key_path=key_path,
+                    Password=password,
+                    Use_sudo=use_sudo,
+                    Sudo_password=sudo_password
+                )
+        except Exception as ssh_error:
+            print(f"❌ SSH failed: {ssh_error}")
+        
+        # Thử WinRM (Windows)
+        try:
+            print("🔄 Attempting WinRM connection...")
+            session = winrm_connect(host, "Window", password or "window")
+            host_info = get_windows_host_info(session)
+            
+            if host_info["status"] == "SUCCESS":
+                print(f"✅ Detected Windows OS: {host_info['os_type']} - Hostname: {host_info['hostname']}")
+                # Chuyển hướng đến audit Windows
+                return await audit_windows_winrm(
+                    host=host,
+                    username="Window",
+                    password=password or "window"
+                )
+            else:
+                print(f"❌ WinRM connection failed: {host_info['error']}")
+                
+        except Exception as winrm_error:
+            print(f"❌ WinRM failed: {winrm_error}")
+        
+        # Nếu cả hai đều thất bại
+        raise HTTPException(
+            status_code=400,
+            detail="Không thể tự động nhận diện OS. Vui lòng kiểm tra: "
+                   "1. Kết nối mạng, 2. Thông tin đăng nhập, 3. Dịch vụ SSH/WinRM"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Auto-detection error: {str(e)}")
 
 @app.post("/audit/windows")
 async def audit_windows_winrm(
@@ -25,13 +90,13 @@ async def audit_windows_winrm(
 ):
     """Audit Windows using WinRM."""
     try:
-        # Test kết nối trước
-        connection_test = test_winrm_connection(host, username, password)
-        if connection_test["status"] != "SUCCESS":
-            raise HTTPException(status_code=400, detail=f"WinRM connection failed: {connection_test['error']}")
-        
         # Kết nối WinRM
         session = winrm_connect(host, username, password)
+        
+        # Lấy thông tin host
+        host_info = get_windows_host_info(session)
+        if host_info["status"] != "SUCCESS":
+            raise HTTPException(status_code=400, detail=f"WinRM connection failed: {host_info['error']}")
         
         # Load rules WinRM
         rules = load_rules()
@@ -45,10 +110,11 @@ async def audit_windows_winrm(
             "client_type": "windows",
             "protocol": "winrm",
             "host": host,
-            "hostname": connection_test["hostname"],
+            "hostname": host_info["hostname"],
+            "os_type": host_info["os_type"],
             "benchmark": "CIS Windows 10 Level 1",
             "total_rules": len(audit_results),
-            "connection_test": connection_test,
+            "connection_info": host_info,
             "results": audit_results
         }
     
@@ -64,7 +130,6 @@ async def get_rules(os_name: Optional[str] = None):
         return {"rules": load_rules()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post("/audit/linux")
 async def audit_linux_json(
@@ -155,7 +220,6 @@ async def audit_linux_json(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/healthz")
 async def healthz():
@@ -248,7 +312,6 @@ async def remediate_linux(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/version")
 async def version():
