@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Form
 from typing import List, Dict, Optional
+from database import db
 import time
 
 # Import từ các module mới
@@ -88,7 +89,7 @@ async def audit_windows_winrm(
     username: str = Form("Window"),
     password: str = Form(..., json_schema_extra={"format": "password"}),
 ):
-    """Audit Windows using WinRM."""
+    """Audit Windows using WinRM - Lưu kết quả vào MongoDB."""
     try:
         # Kết nối WinRM
         session = winrm_connect(host, username, password)
@@ -106,7 +107,23 @@ async def audit_windows_winrm(
         for rule in rules:
             audit_results.append(run_winrm_audit(session, rule))
         
+        # Chuẩn bị dữ liệu audit để lưu vào MongoDB
+        audit_data = {
+            "host": host,
+            "os_type": host_info["os_type"],
+            "client_type": "windows",
+            "protocol": "winrm", 
+            "benchmark": "CIS Windows 10 Level 1",
+            "total_rules": len(audit_results),
+            "results": audit_results,
+            "connection_info": host_info
+        }
+        
+        # LƯU VÀO MONGODB - collection: audit_reports
+        audit_id = db.save_audit_report(audit_data)
+        
         return {
+            "audit_id": audit_id,  # ID từ MongoDB
             "client_type": "windows",
             "protocol": "winrm",
             "host": host,
@@ -114,6 +131,7 @@ async def audit_windows_winrm(
             "os_type": host_info["os_type"],
             "benchmark": "CIS Windows 10 Level 1",
             "total_rules": len(audit_results),
+            "compliance_score": audit_data["compliance_score"],  # Được tính tự động
             "connection_info": host_info,
             "results": audit_results
         }
@@ -233,7 +251,7 @@ async def remediate_windows(
     password: str = Form(..., json_schema_extra={"format": "password"}),
     script_name: str = Form("fix-security-policies.ps1"),
 ):
-    """Chạy remediation script từ file để fix Windows security issues."""
+    """Chạy remediation script - Lưu log vào MongoDB."""
     try:
         # Load script từ file
         script_content = load_windows_remediation_script(script_name)
@@ -243,13 +261,29 @@ async def remediate_windows(
         # Kết nối WinRM
         session = winrm_connect(host, username, password)
         
+        # TODO: Backup trạng thái hiện tại (sẽ làm ở BƯỚC 3 - Rollback)
+        
         # Chạy script qua WinRM
         result = session.run_ps(script_content)
         
         output = result.std_out.decode('utf-8', errors='ignore')
         error = result.std_err.decode('utf-8', errors='ignore')
         
+        # Chuẩn bị dữ liệu remediation để lưu vào MongoDB
+        remediation_data = {
+            "host": host,
+            "script_used": script_name,
+            "status": "SUCCESS" if result.status_code == 0 else "PARTIAL",
+            "exit_code": result.status_code,
+            "output": output,
+            "error": error
+        }
+        
+        # LƯU VÀO MONGODB - collection: remediation_logs
+        remediation_id = db.save_remediation_log(remediation_data)
+        
         return {
+            "remediation_id": remediation_id,  # ID từ MongoDB
             "status": "SUCCESS" if result.status_code == 0 else "PARTIAL",
             "host": host,
             "script_used": script_name,
@@ -310,6 +344,117 @@ async def remediate_linux(
             "stderr": exec_result["stderr"],
             "exit_status": exec_result["exit_status"],
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ==================== REPORTING ENDPOINTS ====================
+
+@app.get("/reports/audits")
+async def get_audit_reports(
+    host: Optional[str] = None,
+    limit: int = 50,
+    os_type: Optional[str] = None
+):
+    """
+    Lấy danh sách audit reports từ MongoDB.
+    
+    Collection: audit_reports
+    Filter: có thể filter theo host và os_type
+    """
+    try:
+        audits = db.get_audit_reports(host=host, limit=limit)
+        
+        # Filter by OS type if provided
+        if os_type:
+            audits = [a for a in audits if a.get("os_type") == os_type]
+            
+        # Convert ObjectId to string for JSON serialization
+        for audit in audits:
+            audit["id"] = str(audit["_id"])
+            del audit["_id"]
+            
+        return {
+            "total": len(audits),
+            "audits": audits
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/reports/remediations")
+async def get_remediation_reports(
+    host: Optional[str] = None,
+    limit: int = 50
+):
+    """
+    Lấy danh sách remediation logs từ MongoDB.
+    
+    Collection: remediation_logs
+    Filter: có thể filter theo host
+    """
+    try:
+        remediations = db.get_remediation_logs(host=host, limit=limit)
+        
+        for remediation in remediations:
+            remediation["id"] = str(remediation["_id"])
+            del remediation["_id"]
+            
+        return {
+            "total": len(remediations),
+            "remediations": remediations
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/reports/hosts")
+async def get_hosts_overview():
+    """
+    Lấy overview của tất cả hosts từ MongoDB.
+    
+    Collection: audit_reports (aggregation)
+    """
+    try:
+        hosts = db.get_hosts_overview()
+        
+        for host in hosts:
+            host["id"] = str(host["_id"])
+            del host["_id"]
+            
+        return {
+            "total_hosts": len(hosts),
+            "hosts": hosts
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/reports/compliance-stats")
+async def get_compliance_statistics():
+    """
+    Lấy thống kê compliance tổng thể từ MongoDB.
+    
+    Collection: audit_reports (aggregation)
+    """
+    try:
+        stats = db.get_compliance_stats()
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/reports/audits/{audit_id}")
+async def get_audit_detail(audit_id: str):
+    """
+    Lấy chi tiết một audit report cụ thể từ MongoDB.
+    
+    Collection: audit_reports
+    """
+    try:
+        audit = db.audits.find_one({"audit_id": audit_id})
+        if not audit:
+            raise HTTPException(status_code=404, detail="Audit report not found")
+        
+        audit["id"] = str(audit["_id"])
+        del audit["_id"]
+        
+        return audit
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
