@@ -1,7 +1,10 @@
 from fastapi import FastAPI, HTTPException, Form
 from typing import List, Dict, Optional
 from database import db
+from rollback import rollback_manager
+
 import time
+import traceback  
 
 # Import từ các module mới
 from utils import load_rules, load_rules_by_os, load_remediation_script, load_windows_remediation_script
@@ -244,55 +247,130 @@ async def healthz():
     """Health check endpoint."""
     return {"status": "ok"}
 
+# SỬA ENDPOINT REMEDIATION ĐỂ TỰ ĐỘNG TẠO BACKUP
 @app.post("/remediate/windows")
 async def remediate_windows(
     host: str = Form(...),
     username: str = Form("Window"),
     password: str = Form(..., json_schema_extra={"format": "password"}),
     script_name: str = Form("fix-security-policies.ps1"),
+    create_backup: bool = Form(True),
 ):
-    """Chạy remediation script - Lưu log vào MongoDB."""
+    """Chạy remediation script - Tự động tạo backup - Lưu log vào MongoDB."""
     try:
+        print(f"🔄 Starting remediation for {host} with username: {username}")
+        
+        # Kết nối WinRM (dùng hàm cũ đã hoạt động)
+        session = winrm_connect(host, username, password)
+        print("✅ WinRM connection established")
+        
+        backup_id = None
+        
+        # Tạo backup nếu được yêu cầu - KHÔNG BLOCK NẾU LỖI
+        if create_backup:
+            try:
+                print("🔍 Creating backup...")
+                backup_id = rollback_manager.create_backup(host, session)
+                if backup_id:
+                    print(f"✅ Backup created: {backup_id}")
+                else:
+                    print(f"⚠️ Backup creation returned None (non-critical error)")
+            except Exception as backup_error:
+                print(f"⚠️ Backup creation failed (non-critical): {backup_error}")
+                # KHÔNG RAISE ERROR - tiếp tục remediation
+        
         # Load script từ file
+        print(f"📄 Loading script: {script_name}")
         script_content = load_windows_remediation_script(script_name)
         if not script_content:
             raise HTTPException(status_code=404, detail=f"Remediation script not found: {script_name}")
         
-        # Kết nối WinRM
-        session = winrm_connect(host, username, password)
-        
-        # TODO: Backup trạng thái hiện tại (sẽ làm ở BƯỚC 3 - Rollback)
-        
-        # Chạy script qua WinRM
+        # Chạy script remediation
+        print("🚀 Running remediation script...")
         result = session.run_ps(script_content)
         
         output = result.std_out.decode('utf-8', errors='ignore')
         error = result.std_err.decode('utf-8', errors='ignore')
         
+        print(f"📊 Script result - Exit code: {result.status_code}")
+        
         # Chuẩn bị dữ liệu remediation để lưu vào MongoDB
         remediation_data = {
             "host": host,
+            "username": username,
             "script_used": script_name,
+            "backup_id": backup_id,
             "status": "SUCCESS" if result.status_code == 0 else "PARTIAL",
             "exit_code": result.status_code,
             "output": output,
-            "error": error
+            "error": error,
+            "rollback_status": "AVAILABLE" if backup_id else "NO_BACKUP",
+            "created_at": datetime.utcnow()
         }
         
-        # LƯU VÀO MONGODB - collection: remediation_logs
+        # LƯU VÀO MONGODB
         remediation_id = db.save_remediation_log(remediation_data)
         
         return {
-            "remediation_id": remediation_id,  # ID từ MongoDB
+            "remediation_id": remediation_id,
+            "backup_id": backup_id,
             "status": "SUCCESS" if result.status_code == 0 else "PARTIAL",
             "host": host,
             "script_used": script_name,
             "exit_code": result.status_code,
-            "output": output,
-            "error": error,
-            "message": f"Remediation script '{script_name}' executed successfully"
+            "output": output[:1000],
+            "error": error[:1000],
+            "message": f"Remediation script '{script_name}' executed successfully",
+            "rollback_available": backup_id is not None
         }
         
+    except Exception as e:
+        print(f"❌ Remediation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/rollback/windows")
+async def rollback_windows(
+    host: str = Form(...),
+    username: str = Form("Window"),  # SỬA: "Administrator" → "Window"
+    password: str = Form(..., json_schema_extra={"format": "password"}),
+    backup_id: Optional[str] = Form(None),
+):
+    """Rollback Windows system về trạng thái trước khi remediation."""
+    try:
+        print(f"🔄 Starting rollback for {host} with username: {username}")
+        
+        session = winrm_connect(host, username, password)
+        print("✅ WinRM connection established")
+        
+        result = rollback_manager.execute_rollback(host, session, backup_id)
+        
+        return {
+            "status": "SUCCESS",
+            "message": "Rollback completed successfully",
+            "host": host,
+            "backup_id": result["backup_id"],
+            "rollback_details": result["rollback_details"]
+        }
+        
+    except Exception as e:
+        print(f"❌ Rollback failed: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/backups/windows")
+async def get_windows_backups(host: Optional[str] = None):
+    """Lấy danh sách backups."""
+    try:
+        if host:
+            backups = rollback_manager.get_backups(host)
+        else:
+            backups = list(db.backups.find({}, sort=[("timestamp", -1)]).limit(50))
+            for backup in backups:
+                backup["_id"] = str(backup["_id"])
+        
+        return {"total": len(backups), "backups": backups}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -457,6 +535,7 @@ async def get_audit_detail(audit_id: str):
         return audit
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/version")
 async def version():

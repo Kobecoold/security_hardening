@@ -8,8 +8,6 @@ class AuditDB:
     def __init__(self, connection_string: str = "mongodb://localhost:27017/"):
         """
         Kết nối đến MongoDB Docker container.
-        
-        MongoDB chạy trong Docker container, kết nối qua localhost:27017
         """
         try:
             self.client = MongoClient(connection_string, serverSelectionTimeoutMS=5000)
@@ -20,12 +18,38 @@ class AuditDB:
             self.db = self.client["security_hardening"]
             self.audits = self.db["audit_reports"]
             self.remediations = self.db["remediation_logs"] 
-            self.backups = self.db["system_backups"]
+            self.backups = self.db["system_backups"]  # THÊM COLLECTION BACKUPS
+            
+            # Kiểm tra collections
+            print(f"✅ Collections: {self.db.list_collection_names()}")
             
         except Exception as e:
             print(f"❌ MongoDB connection failed: {e}")
             print("💡 Kiểm tra: docker ps | grep mongodb")
             raise
+    
+    def save_backup(self, backup_data: Dict) -> str:
+        """Lưu backup vào MongoDB collection system_backups."""
+        try:
+            backup_id = str(uuid.uuid4())
+            backup_data["_id"] = backup_id
+            backup_data["backup_id"] = backup_id
+            backup_data["created_at"] = datetime.utcnow()
+            
+            self.backups.insert_one(backup_data)
+            print(f"✅ Backup saved to MongoDB: {backup_id}")
+            return backup_id
+        except Exception as e:
+            print(f"❌ Failed to save backup: {e}")
+            raise
+    
+    def get_backups_by_host(self, host: str, limit: int = 10) -> List[Dict]:
+        """Lấy danh sách backups của một host."""
+        return list(self.backups.find({"host": host}).sort("created_at", -1).limit(limit))
+    
+    def get_latest_backup(self, host: str) -> Optional[Dict]:
+        """Lấy backup mới nhất của host."""
+        return self.backups.find_one({"host": host, "type": "pre_remediation_backup"}, sort=[("created_at", -1)])
     
     def save_audit_report(self, audit_data: Dict) -> str:
         """Lưu kết quả audit vào MongoDB"""
