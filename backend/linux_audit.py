@@ -117,3 +117,36 @@ def truncate_output(text: str, limit: int = 8192) -> Dict:
         "sha256": hashlib.sha256(text.encode()).hexdigest(),
     }
 
+
+def get_linux_host_info(ssh: paramiko.SSHClient) -> Dict:
+    """Lấy thông tin host Linux tương tự get_windows_host_info."""
+    try:
+        # Lấy hostname
+        stdin, stdout, stderr = ssh.exec_command("hostname")
+        hostname = stdout.read().decode().strip()
+        exit_code = stdout.channel.recv_exit_status()
+        
+        if exit_code != 0:
+            hostname = "Unknown"
+        
+        # Detect OS
+        os_type = detect_os(ssh)
+        
+        # Lấy thêm thông tin kernel version (optional)
+        stdin, stdout, stderr = ssh.exec_command("uname -r")
+        kernel_version = stdout.read().decode().strip() if stdout.channel.recv_exit_status() == 0 else "Unknown"
+        
+        return {
+            "status": "SUCCESS",
+            "hostname": hostname,
+            "os_type": os_type,
+            "kernel_version": kernel_version,
+            "exit_code": exit_code,
+            "message": "SSH connection successful"
+        }
+    except Exception as e:
+        return {
+            "status": "FAILED",
+            "error": str(e),
+            "message": "SSH connection failed"
+        }
