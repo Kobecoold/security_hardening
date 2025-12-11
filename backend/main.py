@@ -26,14 +26,26 @@ app = FastAPI(
 @app.get("/")
 async def root():
     """Root endpoint - API information and quick links."""
+    has_keys = auth_manager.has_any_active_keys()
     return {
         "name": "Security Hardening Agentless API",
         "version": "1.0.0",
         "description": "API for agentless security hardening audit and remediation",
+        "authentication": {
+            "required": True,
+            "method": "API Key (X-API-Key header)",
+            "setup_endpoint": "/auth/setup" if not has_keys else None,
+            "status": "configured" if has_keys else "not_configured"
+        },
         "docs": "/docs",
         "health": "/healthz",
         "version_endpoint": "/version",
         "endpoints": {
+            "auth": {
+                "setup": "/auth/setup (create first API key - no auth required)",
+                "create_key": "/auth/api-keys (requires auth)",
+                "list_keys": "/auth/api-keys (requires auth)"
+            },
             "audit": {
                 "linux": "/audit/linux",
                 "windows": "/audit/windows"
@@ -763,6 +775,34 @@ async def get_audit_detail(audit_id: str):
 
 
 # ==================== AUTHENTICATION ENDPOINTS ====================
+
+@app.post("/auth/setup")
+async def setup_first_api_key(
+    name: str = Form("Default API Key"),
+    description: str = Form("Initial API key created during setup"),
+    expires_days: Optional[int] = Form(None),
+):
+    """
+    Tạo API key đầu tiên (không cần authentication).
+    Chỉ hoạt động nếu chưa có API key nào trong hệ thống.
+    """
+    try:
+        # Kiểm tra xem đã có key nào chưa
+        if auth_manager.has_any_active_keys():
+            raise HTTPException(
+                status_code=403,
+                detail="API keys already exist. Use /auth/api-keys endpoint with authentication to create new keys."
+            )
+        
+        result = auth_manager.generate_api_key(name, description, expires_days)
+        return {
+            **result,
+            "message": "✅ First API key created successfully! Use this key in X-API-Key header for all requests."
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/auth/api-keys", dependencies=[RequireAuth])
 async def create_api_key(

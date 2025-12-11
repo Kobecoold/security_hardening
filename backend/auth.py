@@ -103,6 +103,11 @@ class AuthManager:
             if key.get("revoked_at"):
                 key["revoked_at"] = key["revoked_at"].isoformat()
         return keys
+    
+    def has_any_active_keys(self) -> bool:
+        """Kiểm tra xem có API key nào active không."""
+        count = self.api_keys_collection.count_documents({"is_active": True})
+        return count > 0
 
 # Global instance
 auth_manager = AuthManager()
