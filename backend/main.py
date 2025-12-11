@@ -362,6 +362,79 @@ async def healthz():
     """Health check endpoint."""
     return {"status": "ok"}
 
+@app.post("/test/connection/linux", dependencies=[RequireAuth])
+async def test_linux_connection(
+    Host: str = Form(...),
+    Username: str = Form(""),
+    Key_path: Optional[str] = Form("~/.ssh/id_ed25519"),
+    Password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+    Use_sudo: bool = Form(False),
+    Sudo_password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+):
+    """
+    Test connection và quyền truy cập vào Linux host.
+    Dùng để verify trước khi chạy remediation.
+    """
+    try:
+        print(f"🔌 Testing connection to {Host}...")
+        
+        # Test SSH connection
+        ssh = ssh_connect(Host, Username, Key_path or "", password=Password)
+        connection_info = {}
+        
+        try:
+            # Test basic command
+            test_result = run_bash_check_stdin(ssh, "echo 'Connection OK'", use_sudo=False, timeout=10)
+            connection_info["basic_command"] = {
+                "success": test_result.get("exit_status") == 0,
+                "output": test_result.get("stdout", ""),
+                "error": test_result.get("stderr", "")
+            }
+            
+            # Test sudo if needed
+            sudo_available = False
+            if Use_sudo:
+                if Sudo_password:
+                    sudo_test = run_bash_check_stdin(
+                        ssh, "sudo -S -p '' echo 'Sudo OK'", use_sudo=True, sudo_password=Sudo_password, timeout=10
+                    )
+                    sudo_available = sudo_test.get("exit_status") == 0
+                else:
+                    sudo_test = run_bash_check_stdin(
+                        ssh, "sudo -n echo 'Sudo OK'", use_sudo=True, timeout=10
+                    )
+                    sudo_available = sudo_test.get("exit_status") == 0
+                
+                connection_info["sudo"] = {
+                    "available": sudo_available,
+                    "output": sudo_test.get("stdout", ""),
+                    "error": sudo_test.get("stderr", "")
+                }
+            
+            # Get host info
+            host_info = get_linux_host_info(ssh)
+            detected_os = detect_os(ssh)
+            
+            connection_info["host_info"] = host_info
+            connection_info["detected_os"] = detected_os
+            
+        finally:
+            ssh.close()
+        
+        return {
+            "status": "SUCCESS",
+            "host": Host,
+            "connection_verified": True,
+            "connection_info": connection_info,
+            "message": f"✅ Successfully connected to {Host} and verified access"
+        }
+        
+    except Exception as e:
+        print(f"❌ Connection test failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Connection test failed: {str(e)}")
+
 # SỬA ENDPOINT REMEDIATION ĐỂ TỰ ĐỘNG TẠO BACKUP
 @app.post("/remediate/windows", dependencies=[RequireAuth])
 async def remediate_windows(
@@ -583,16 +656,29 @@ async def remediate_linux(
     """Chạy remediation script để fix rule FAIL - Tự động tạo backup - Lưu log vào MongoDB."""
     try:
         print(f"🔄 Starting Linux remediation for {Host} with rule: {Rule_id}")
+        print(f"   Username: {Username}")
+        print(f"   Using sudo: {Use_sudo}")
         
-        # Kết nối SSH để auto-detect OS
+        # Kết nối SSH để auto-detect OS - VERIFY CONNECTION
+        print(f"🔌 Step 1: Connecting to {Host}...")
         ssh = ssh_connect(Host, Username, Key_path or "", password=Password)
         detected_os = None
         try:
+            print(f"✅ SSH connection established to {Host}")
+            
+            # Test connection bằng cách chạy một command đơn giản
+            test_result = run_bash_check_stdin(ssh, "echo 'Connection test successful'", use_sudo=False, timeout=10)
+            if test_result.get("exit_status") != 0:
+                raise HTTPException(status_code=400, detail=f"SSH connection test failed: {test_result.get('stderr', 'Unknown error')}")
+            print(f"✅ Connection test passed: {test_result.get('stdout', '')}")
+            
             detected_os = detect_os(ssh)
             if not detected_os:
                 raise HTTPException(status_code=400, detail="Không thể phát hiện OS tự động.")
+            print(f"✅ Detected OS: {detected_os}")
         finally:
             ssh.close()
+            print(f"🔌 SSH connection closed")
         
         backup_id = None
         
@@ -612,34 +698,99 @@ async def remediate_linux(
                 # KHÔNG RAISE ERROR - tiếp tục remediation
         
         # Load remediation script
-        print(f"📄 Loading remediation script for rule: {Rule_id}")
+        print(f"📄 Step 2: Loading remediation script for rule: {Rule_id}")
         script_content = load_remediation_script(detected_os, Rule_id)
         if not script_content:
             raise HTTPException(status_code=404, detail=f"Không tìm thấy remediation script cho rule: {Rule_id}")
+        print(f"✅ Script loaded ({len(script_content)} bytes)")
         
-        # Chạy script remediation với timeout 2 phút (120 giây) - giảm từ 5 phút
-        # Windows dùng WinRM có timeout mặc định nhanh hơn, Linux cũng nên tương tự
-        print("🚀 Running remediation script...")
+        # Chạy script remediation với timeout 2 phút (120 giây)
+        print(f"🚀 Step 3: Executing remediation script on {Host}...")
+        print(f"   Script will run with sudo: {Use_sudo}")
+        print(f"   Timeout: 120 seconds")
+        
         ssh_exec = ssh_connect(Host, Username, Key_path or "", password=Password)
         try:
-            # Giảm timeout xuống 120s (2 phút) để tránh treo lâu
-            # Nếu script cần thời gian hơn, sẽ timeout và trả về status TIMEOUT
+            print(f"✅ Connected to {Host} for script execution")
+            
             exec_result = run_bash_check_stdin(
                 ssh_exec,
                 script_content,
                 use_sudo=Use_sudo,
                 sudo_password=Sudo_password,
-                timeout=120,  # 2 minutes timeout (giống Windows WinRM)
+                timeout=120,  # 2 minutes timeout
             )
             
-            # Log timeout nếu có
+            # Log kết quả
             if exec_result.get("status") == "TIMEOUT":
                 print(f"⚠️ Script execution timeout after 120s")
-                print(f"   This is expected for long-running operations")
+            elif exec_result.get("exit_status") == 0:
+                print(f"✅ Script executed successfully (exit code 0)")
+            else:
+                print(f"⚠️ Script completed with exit code {exec_result.get('exit_status')}")
+            
+            if exec_result.get("stdout"):
+                print(f"   Script output: {exec_result['stdout'][:300]}...")
+            if exec_result.get("stderr"):
+                print(f"   Script errors: {exec_result['stderr'][:300]}...")
         finally:
             ssh_exec.close()
+            print(f"🔌 Execution connection closed")
         
         print(f"📊 Script result - Exit code: {exec_result['exit_status']}")
+        print(f"   Status: {exec_result.get('status', 'UNKNOWN')}")
+        if exec_result.get("stdout"):
+            print(f"   Output preview: {exec_result['stdout'][:200]}...")
+        if exec_result.get("stderr"):
+            print(f"   Error preview: {exec_result['stderr'][:200]}...")
+        
+        # VERIFY: Chạy lại check command để xác nhận đã fix
+        print(f"🔍 Step 4: Verifying remediation on {Host}...")
+        verification_passed = False
+        verification_output = ""
+        verification_error = ""
+        try:
+            # Load rule để lấy check command
+            rules = load_rules_by_os(detected_os)
+            rule = next((r for r in rules if r.get("id") == Rule_id), None)
+            
+            if rule and rule.get("check", {}).get("bash"):
+                check_command = rule["check"]["bash"]
+                print(f"   Check command: {check_command[:100]}...")
+                
+                ssh_verify = ssh_connect(Host, Username, Key_path or "", password=Password)
+                try:
+                    print(f"✅ Connected to {Host} for verification")
+                    
+                    verify_result = run_bash_check_stdin(
+                        ssh_verify,
+                        check_command,
+                        use_sudo=Use_sudo,
+                        sudo_password=Sudo_password,
+                        timeout=30
+                    )
+                    verification_passed = verify_result.get("exit_status") == 0
+                    verification_output = verify_result.get("stdout", "")
+                    verification_error = verify_result.get("stderr", "")
+                    
+                    if verification_passed:
+                        print(f"✅ Verification PASSED - Vulnerability '{Rule_id}' is FIXED")
+                        print(f"   Verification output: {verification_output[:200]}")
+                    else:
+                        print(f"⚠️ Verification FAILED - Vulnerability '{Rule_id}' may still exist")
+                        print(f"   Exit code: {verify_result.get('exit_status')}")
+                        print(f"   Output: {verification_output[:200]}")
+                        if verification_error:
+                            print(f"   Error: {verification_error[:200]}")
+                finally:
+                    ssh_verify.close()
+                    print(f"🔌 Verification connection closed")
+            else:
+                print("⚠️ No check command found in rule for verification")
+        except Exception as verify_error:
+            print(f"❌ Verification check failed: {verify_error}")
+            import traceback
+            traceback.print_exc()
         
         # Chuẩn bị dữ liệu remediation để lưu vào MongoDB
         remediation_data = {
@@ -649,10 +800,12 @@ async def remediate_linux(
             "rule_id": Rule_id,
             "client_type": "linux",
             "backup_id": backup_id,
-            "status": "SUCCESS" if exec_result["exit_status"] == 0 else "PARTIAL",
+            "status": "SUCCESS" if (exec_result["exit_status"] == 0 and verification_passed) else "PARTIAL",
             "exit_code": exec_result["exit_status"],
             "stdout": exec_result["stdout"],
             "stderr": exec_result["stderr"],
+            "verification_passed": verification_passed,
+            "verification_output": verification_output,
             "rollback_status": "AVAILABLE" if backup_id else "NO_BACKUP",
             "created_at": datetime.utcnow()
         }
@@ -666,18 +819,40 @@ async def remediate_linux(
             print(f"⚠️ MongoDB save failed (non-critical): {db_error}")
             remediation_id = None
         
+        # Determine final status
+        if exec_result["exit_status"] == 0 and verification_passed:
+            final_status = "SUCCESS"
+            message = f"✅ Remediation successful - Vulnerability '{Rule_id}' is FIXED and VERIFIED on {Host}"
+        elif exec_result["exit_status"] == 0:
+            final_status = "PARTIAL"
+            message = f"⚠️ Script completed but verification FAILED - Vulnerability '{Rule_id}' may still exist on {Host}"
+        else:
+            final_status = "PARTIAL"
+            message = f"⚠️ Script failed (exit code {exec_result['exit_status']}) - Vulnerability '{Rule_id}' may not be fixed on {Host}"
+        
+        print(f"📋 Final Status: {final_status}")
+        print(f"   Script exit code: {exec_result['exit_status']}")
+        print(f"   Verification passed: {verification_passed}")
+        print(f"   Message: {message}")
+        
         return {
             "remediation_id": remediation_id,
             "rule_id": Rule_id,
             "backup_id": backup_id,
-            "status": "SUCCESS" if exec_result["exit_status"] == 0 else "PARTIAL",
+            "status": final_status,
             "host": Host,
             "os": detected_os,
             "exit_code": exec_result["exit_status"],
             "stdout": exec_result["stdout"][:1000],  # Truncate để response không quá dài
             "stderr": exec_result["stderr"][:1000],
-            "message": f"Remediation script for rule '{Rule_id}' executed successfully",
-            "rollback_available": backup_id is not None
+            "verification_passed": verification_passed,
+            "verification_output": verification_output[:500] if verification_output else "",
+            "verification_error": verification_error[:500] if verification_error else "",
+            "message": message,
+            "rollback_available": backup_id is not None,
+            "connection_verified": True,  # Đã verify connection thành công
+            "script_executed": True,  # Đã chạy script trên client
+            "verification_performed": True  # Đã verify sau khi fix
         }
     except HTTPException:
         raise

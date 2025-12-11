@@ -20,6 +20,14 @@ wait_for_apt() {
     return 0
 }
 
+# Check if already fixed
+if ! systemctl is-enabled rpcbind 2>/dev/null | grep -q enabled; then
+    if ! dpkg -s rpcbind >/dev/null 2>&1; then
+        echo "✅ rpcbind is already disabled and not installed - FIXED"
+        exit 0
+    fi
+fi
+
 # Stop and disable rpcbind (with timeout)
 timeout 30 systemctl stop rpcbind 2>/dev/null || true
 timeout 30 systemctl disable rpcbind 2>/dev/null || true
@@ -33,6 +41,20 @@ if dpkg -s rpcbind >/dev/null 2>&1; then
     }
     echo "✅ rpcbind removed"
 else
-    echo "ℹ️ rpcbind is not installed (service disabled)"
+    echo "ℹ️ rpcbind is not installed"
+fi
+
+# VERIFY: Check if fix was successful
+if ! systemctl is-enabled rpcbind 2>/dev/null | grep -q enabled; then
+    if ! dpkg -s rpcbind >/dev/null 2>&1; then
+        echo "✅ VERIFIED: rpcbind is disabled and not installed - FIXED"
+        exit 0
+    else
+        echo "⚠️ rpcbind is disabled but still installed (package removal may have failed)"
+        exit 1
+    fi
+else
+    echo "❌ VERIFICATION FAILED: rpcbind is still enabled"
+    exit 1
 fi
 
