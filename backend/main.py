@@ -1,4 +1,6 @@
 from fastapi import FastAPI, HTTPException, Form
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from typing import List, Dict, Optional
 from database import db
 from rollback import rollback_manager
@@ -6,6 +8,7 @@ from linux_rollback import linux_rollback_manager
 
 import time
 import traceback
+import os
 from datetime import datetime
 
 # Import từ các module mới
@@ -14,6 +17,9 @@ from linux_audit import detect_os, ssh_connect, run_bash_check_stdin, truncate_o
 from windows_audit import winrm_connect, run_winrm_audit, get_windows_host_info, detect_os_windows
 from auth import auth_manager, RequireAuth
 
+# Đường dẫn đến dashboard
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+DASHBOARD_DIR = os.path.join(REPO_ROOT, "dashboard")
 
 app = FastAPI(
     title="Security Hardening Audit Engine",
@@ -22,6 +28,15 @@ app = FastAPI(
         "tryItOutEnabled": True,
     },
 )
+
+# Serve dashboard static files
+if os.path.exists(DASHBOARD_DIR):
+    app.mount("/dashboard", StaticFiles(directory=DASHBOARD_DIR, html=True), name="dashboard")
+    
+    @app.get("/")
+    async def root_redirect():
+        """Redirect root to dashboard."""
+        return FileResponse(os.path.join(DASHBOARD_DIR, "index.html"))
 
 @app.get("/")
 async def root():
@@ -837,6 +852,34 @@ async def revoke_api_key(api_key_hash: str):
             raise HTTPException(status_code=404, detail="API key not found")
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/auth/api-keys/{api_key_hash}/delete", dependencies=[RequireAuth])
+async def delete_api_key(api_key_hash: str):
+    """Xóa hoàn toàn API key (không chỉ revoke)."""
+    try:
+        success = auth_manager.delete_api_key_by_hash(api_key_hash)
+        if success:
+            return {"status": "success", "message": "API key deleted permanently"}
+        else:
+            raise HTTPException(status_code=404, detail="API key not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/auth/api-keys", dependencies=[RequireAuth])
+async def clear_all_api_keys():
+    """Xóa tất cả API keys (RESET - cẩn thận!)."""
+    try:
+        deleted_count = auth_manager.delete_all_api_keys()
+        return {
+            "status": "success",
+            "message": f"All API keys deleted ({deleted_count} keys removed)",
+            "deleted_count": deleted_count,
+            "warning": "⚠️ You can now use /auth/setup to create a new first API key"
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

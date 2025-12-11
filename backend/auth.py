@@ -108,6 +108,16 @@ class AuthManager:
         """Kiểm tra xem có API key nào active không."""
         count = self.api_keys_collection.count_documents({"is_active": True})
         return count > 0
+    
+    def delete_all_api_keys(self) -> int:
+        """Xóa tất cả API keys (dùng để reset)."""
+        result = self.api_keys_collection.delete_many({})
+        return result.deleted_count
+    
+    def delete_api_key_by_hash(self, api_key_hash: str) -> bool:
+        """Xóa API key theo hash (xóa hoàn toàn, không chỉ revoke)."""
+        result = self.api_keys_collection.delete_one({"api_key_hash": api_key_hash})
+        return result.deleted_count > 0
 
 # Global instance
 auth_manager = AuthManager()
