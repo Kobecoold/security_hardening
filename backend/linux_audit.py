@@ -102,32 +102,73 @@ def run_bash_check_stdin(
         except Exception:
             pass
     
-    # Read output with timeout
+    # Read output with timeout - Cải thiện để tránh treo
     out = ""
     err = ""
     exit_status = -1
     
     try:
-        # Wait for command to complete with timeout
+        # Wait for command to complete with timeout - đọc output trong khi chờ
         import time
-        start_time = time.time()
+        import select
         
+        start_time = time.time()
+        stdout.channel.settimeout(1.0)  # Set socket timeout để có thể đọc non-blocking
+        stderr.channel.settimeout(1.0)
+        
+        # Đọc output trong khi chờ command hoàn thành
         while not stdout.channel.exit_status_ready():
-            if time.time() - start_time > timeout:
-                stdout.channel.close()
-                stderr.channel.close()
+            elapsed = time.time() - start_time
+            if elapsed > timeout:
+                # Force close channels
+                try:
+                    stdout.channel.close()
+                    stderr.channel.close()
+                except:
+                    pass
                 return {
                     "stdout": out,
                     "stderr": err + f"\n⚠️ Command timeout after {timeout} seconds",
                     "exit_status": 124,  # Standard timeout exit code
                     "status": "TIMEOUT",
                 }
+            
+            # Đọc output nếu có (non-blocking)
+            try:
+                if stdout.channel.recv_ready():
+                    chunk = stdout.channel.recv(4096).decode('utf-8', errors='ignore')
+                    out += chunk
+                if stderr.channel.recv_stderr_ready():
+                    chunk = stderr.channel.recv_stderr(4096).decode('utf-8', errors='ignore')
+                    err += chunk
+            except socket.timeout:
+                # Socket timeout là bình thường khi chờ
+                pass
+            except Exception:
+                # Ignore other errors khi đọc
+                pass
+            
+            # Sleep ngắn để không tốn CPU
             time.sleep(0.1)
         
-        # Read remaining output
-        out = stdout.read().decode().strip()
-        err = stderr.read().decode().strip()
+        # Command đã hoàn thành, đọc phần còn lại
+        try:
+            remaining_out = stdout.read().decode('utf-8', errors='ignore')
+            if remaining_out:
+                out += remaining_out
+        except:
+            pass
+        
+        try:
+            remaining_err = stderr.read().decode('utf-8', errors='ignore')
+            if remaining_err:
+                err += remaining_err
+        except:
+            pass
+        
+        # Lấy exit status
         exit_status = stdout.channel.recv_exit_status()
+        
     except socket.timeout:
         return {
             "stdout": out,

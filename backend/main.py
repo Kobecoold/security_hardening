@@ -617,17 +617,25 @@ async def remediate_linux(
         if not script_content:
             raise HTTPException(status_code=404, detail=f"Không tìm thấy remediation script cho rule: {Rule_id}")
         
-        # Chạy script remediation với timeout 5 phút (300 giây)
+        # Chạy script remediation với timeout 2 phút (120 giây) - giảm từ 5 phút
+        # Windows dùng WinRM có timeout mặc định nhanh hơn, Linux cũng nên tương tự
         print("🚀 Running remediation script...")
         ssh_exec = ssh_connect(Host, Username, Key_path or "", password=Password)
         try:
+            # Giảm timeout xuống 120s (2 phút) để tránh treo lâu
+            # Nếu script cần thời gian hơn, sẽ timeout và trả về status TIMEOUT
             exec_result = run_bash_check_stdin(
                 ssh_exec,
                 script_content,
                 use_sudo=Use_sudo,
                 sudo_password=Sudo_password,
-                timeout=300,  # 5 minutes timeout
+                timeout=120,  # 2 minutes timeout (giống Windows WinRM)
             )
+            
+            # Log timeout nếu có
+            if exec_result.get("status") == "TIMEOUT":
+                print(f"⚠️ Script execution timeout after 120s")
+                print(f"   This is expected for long-running operations")
         finally:
             ssh_exec.close()
         
