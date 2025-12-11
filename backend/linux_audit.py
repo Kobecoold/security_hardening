@@ -79,20 +79,44 @@ def run_bash_check_stdin(
     
     base = "bash -s"
     if use_sudo and sudo_password:
+        # Dùng sudo -S để đọc password từ stdin
+        # -p '' để không hiển thị prompt (tránh prompt xuất hiện trong output)
         command = f"sudo -S -p '' {base}"
         stdin, stdout, stderr = ssh.exec_command(command, get_pty=True, timeout=timeout)
+        
+        # Đợi một chút và đọc output để đảm bảo sudo sẵn sàng nhận password
+        import time
+        time.sleep(0.1)  # Đợi ngắn để channel khởi tạo
+        
+        # Đọc một chút output để đảm bảo sudo đã khởi động (nếu có)
+        try:
+            # Set timeout ngắn cho việc đọc ban đầu
+            stdout.channel.settimeout(0.5)
+            if stdout.channel.recv_ready():
+                # Đọc và discard output ban đầu (có thể là prompt hoặc empty)
+                stdout.channel.recv(1024)
+        except (socket.timeout, Exception):
+            # Không có output ban đầu là bình thường
+            pass
+        
+        # Ghi password vào stdin (sudo -S đọc từ stdin)
         try:
             stdin.write(f"{sudo_password}\n")
             stdin.flush()
+            # Đợi thêm một chút để đảm bảo password được xử lý
+            time.sleep(0.15)
         except Exception:
+            # Nếu không ghi được password, vẫn tiếp tục (có thể sudo không cần password)
             pass
     elif use_sudo:
+        # Dùng sudo -n (non-interactive) - chỉ hoạt động nếu có NOPASSWD trong sudoers
         command = f"sudo -n {base}"
         stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
     else:
         command = base
         stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
     
+    # Ghi script vào stdin
     try:
         stdin.write(script_text)
         stdin.flush()

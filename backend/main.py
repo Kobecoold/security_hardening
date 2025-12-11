@@ -260,50 +260,93 @@ async def audit_linux_json(
         results: List[Dict] = []
         start_overall = time.time()
 
-        def run_one(rule: Dict) -> Dict:
+        def run_one(rule: Dict, rule_index: int, total_rules: int) -> Dict:
+            rule_id = rule.get("id", "unknown")
+            rule_title = rule.get("title", "Unknown")
+            
+            print(f"  [{rule_index}/{total_rules}] Checking: {rule_id} - {rule_title}")
+            
             check = rule.get("check", {}) if isinstance(rule, dict) else {}
             script_text = check.get("bash") if isinstance(check, dict) else None
             if not script_text:
-                return {"id": rule.get("id"), "title": rule.get("title"), "status": "SKIPPED", "reason": "no check.bash"}
+                print(f"    ⚠️ Skipped: no check.bash")
+                return {"id": rule_id, "title": rule_title, "status": "SKIPPED", "reason": "no check.bash"}
+            
             effective_use_sudo = bool(rule.get("needs_sudo", False) or Use_sudo)
             started = time.time()
-            ssh_local = ssh_connect(Host, Username, Key_path or "", password=Password)
+            
             try:
-                exec_result = run_bash_check_stdin(
-                    ssh_local,
-                    script_text,
-                    use_sudo=effective_use_sudo,
-                    sudo_password=Sudo_password,
-                )
-            finally:
+                ssh_local = ssh_connect(Host, Username, Key_path or "", password=Password)
                 try:
-                    ssh_local.close()
-                except Exception:
-                    pass
-            duration_ms = int((time.time() - started) * 1000)
-            tout_dict = truncate_output(exec_result["stdout"]) 
-            terr_dict = truncate_output(exec_result["stderr"]) 
-            return {
-                "id": rule.get("id"),
-                "title": rule.get("title"),
-                "os": rule.get("os"),
-                "benchmark": rule.get("benchmark"),
-                "needs_sudo": effective_use_sudo,
-                "exit_status": exec_result["exit_status"],
-                "status": exec_result["status"],
-                "stdout": tout_dict.get("text", ""),
-                "stdout_truncated": tout_dict.get("truncated", False),
-                "stdout_sha256": tout_dict.get("sha256"),
-                "stderr": terr_dict.get("text", ""),
-                "stderr_truncated": terr_dict.get("truncated", False),
-                "stderr_sha256": terr_dict.get("sha256"),
-                "duration_ms": duration_ms,
-                "started_at": int(started * 1000),
-            }
+                    # Giảm timeout xuống 30s cho mỗi audit check (nhanh hơn remediation)
+                    exec_result = run_bash_check_stdin(
+                        ssh_local,
+                        script_text,
+                        use_sudo=effective_use_sudo,
+                        sudo_password=Sudo_password,
+                        timeout=30,  # 30 seconds timeout cho audit checks
+                    )
+                finally:
+                    try:
+                        ssh_local.close()
+                    except Exception:
+                        pass
+                
+                duration_ms = int((time.time() - started) * 1000)
+                
+                # Log kết quả
+                if exec_result.get("status") == "TIMEOUT":
+                    print(f"    ⚠️ TIMEOUT after 30s")
+                elif exec_result.get("exit_status") == 0:
+                    print(f"    ✅ PASS ({duration_ms}ms)")
+                else:
+                    print(f"    ❌ FAIL ({duration_ms}ms)")
+                
+                tout_dict = truncate_output(exec_result["stdout"]) 
+                terr_dict = truncate_output(exec_result["stderr"]) 
+                return {
+                    "id": rule_id,
+                    "title": rule_title,
+                    "os": rule.get("os"),
+                    "benchmark": rule.get("benchmark"),
+                    "needs_sudo": effective_use_sudo,
+                    "exit_status": exec_result["exit_status"],
+                    "status": exec_result["status"],
+                    "stdout": tout_dict.get("text", ""),
+                    "stdout_truncated": tout_dict.get("truncated", False),
+                    "stdout_sha256": tout_dict.get("sha256"),
+                    "stderr": terr_dict.get("text", ""),
+                    "stderr_truncated": terr_dict.get("truncated", False),
+                    "stderr_sha256": terr_dict.get("sha256"),
+                    "duration_ms": duration_ms,
+                    "started_at": int(started * 1000),
+                }
+            except Exception as rule_error:
+                print(f"    ❌ ERROR: {str(rule_error)[:100]}")
+                return {
+                    "id": rule_id,
+                    "title": rule_title,
+                    "status": "ERROR",
+                    "error": str(rule_error),
+                    "duration_ms": int((time.time() - started) * 1000),
+                }
 
-        # Chạy tuần tự
-        for rule in rules:
-            results.append(run_one(rule))
+        # Chạy tuần tự với progress logging
+        print(f"🚀 Running {len(rules)} audit checks on {Host}...")
+        print(f"   Timeout per check: 30 seconds")
+        print(f"   Estimated time: ~{len(rules) * 30 / 60:.1f} minutes")
+        
+        for i, rule in enumerate(rules, 1):
+            try:
+                results.append(run_one(rule, i, len(rules)))
+            except Exception as e:
+                print(f"  ❌ Fatal error on rule {i}: {e}")
+                results.append({
+                    "id": rule.get("id", "unknown"),
+                    "title": rule.get("title", "Unknown"),
+                    "status": "ERROR",
+                    "error": str(e)
+                })
 
         # Lấy thông tin host
         ssh_info = ssh_connect(Host, Username, Key_path or "", password=Password)
