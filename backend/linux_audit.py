@@ -66,12 +66,21 @@ def run_bash_check_stdin(
     script_text: str,
     use_sudo: bool = False,
     sudo_password: Optional[str] = None,
+    timeout: int = 300,
 ) -> Dict:
-    """Truyền script qua stdin. PASS nếu exit code = 0."""
+    """
+    Truyền script qua stdin. PASS nếu exit code = 0.
+    
+    Args:
+        timeout: Timeout in seconds (default 300 = 5 minutes)
+    """
+    import select
+    import socket
+    
     base = "bash -s"
     if use_sudo and sudo_password:
         command = f"sudo -S -p '' {base}"
-        stdin, stdout, stderr = ssh.exec_command(command, get_pty=True)
+        stdin, stdout, stderr = ssh.exec_command(command, get_pty=True, timeout=timeout)
         try:
             stdin.write(f"{sudo_password}\n")
             stdin.flush()
@@ -79,10 +88,10 @@ def run_bash_check_stdin(
             pass
     elif use_sudo:
         command = f"sudo -n {base}"
-        stdin, stdout, stderr = ssh.exec_command(command)
+        stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
     else:
         command = base
-        stdin, stdout, stderr = ssh.exec_command(command)
+        stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
     
     try:
         stdin.write(script_text)
@@ -93,9 +102,46 @@ def run_bash_check_stdin(
         except Exception:
             pass
     
-    out = stdout.read().decode().strip()
-    err = stderr.read().decode().strip()
-    exit_status = stdout.channel.recv_exit_status()
+    # Read output with timeout
+    out = ""
+    err = ""
+    exit_status = -1
+    
+    try:
+        # Wait for command to complete with timeout
+        import time
+        start_time = time.time()
+        
+        while not stdout.channel.exit_status_ready():
+            if time.time() - start_time > timeout:
+                stdout.channel.close()
+                stderr.channel.close()
+                return {
+                    "stdout": out,
+                    "stderr": err + f"\n⚠️ Command timeout after {timeout} seconds",
+                    "exit_status": 124,  # Standard timeout exit code
+                    "status": "TIMEOUT",
+                }
+            time.sleep(0.1)
+        
+        # Read remaining output
+        out = stdout.read().decode().strip()
+        err = stderr.read().decode().strip()
+        exit_status = stdout.channel.recv_exit_status()
+    except socket.timeout:
+        return {
+            "stdout": out,
+            "stderr": err + f"\n⚠️ SSH connection timeout after {timeout} seconds",
+            "exit_status": 124,
+            "status": "TIMEOUT",
+        }
+    except Exception as e:
+        return {
+            "stdout": out,
+            "stderr": err + f"\n⚠️ Error reading output: {str(e)}",
+            "exit_status": -1,
+            "status": "ERROR",
+        }
     
     return {
         "stdout": out,

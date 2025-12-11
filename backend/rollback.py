@@ -33,6 +33,7 @@ class RollbackManager:
             }
             
             # 1. Backup Password Policy (CHỈ ĐỌC, KHÔNG THAY ĐỔI)
+            # WinRM có timeout mặc định ~30s, các commands này thường nhanh (<5s)
             try:
                 print("🔍 Backing up password policy...")
                 net_result = session.run_cmd('net accounts')
@@ -41,14 +42,14 @@ class RollbackManager:
                     backup_data["data"]["password_policy"] = self._parse_net_accounts(net_output)
                     print(f"   ✓ Password policy backed up")
                 else:
-                    print(f"   ⚠️ Failed to get password policy")
+                    print(f"   ⚠️ Failed to get password policy (skipped)")
             except Exception as e:
-                print(f"   ❌ Error backing up password policy: {e}")
+                print(f"   ⚠️ Error backing up password policy (skipped): {e}")
             
             # 2. Backup Remote Assistance
             try:
                 print("🔍 Backing up remote assistance setting...")
-                reg_result = session.run_cmd('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Remote Assistance" /v fAllowToGetHelp')
+                reg_result = session.run_cmd('reg query "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Remote Assistance" /v fAllowToGetHelp')
                 if reg_result.status_code == 0:
                     reg_output = reg_result.std_out.decode().strip()
                     if "0x0" in reg_output:
@@ -58,8 +59,9 @@ class RollbackManager:
                     print(f"   ✓ Remote assistance backed up")
                 else:
                     backup_data["data"]["remote_assistance"] = 1
+                    print(f"   ⚠️ Failed to get remote assistance (using default)")
             except Exception as e:
-                print(f"   ❌ Error backing up remote assistance: {e}")
+                print(f"   ⚠️ Error backing up remote assistance (using default): {e}")
                 backup_data["data"]["remote_assistance"] = 1
             
             # 3. Backup Administrator Account Status
@@ -75,8 +77,9 @@ class RollbackManager:
                     print(f"   ✓ Administrator account status backed up")
                 else:
                     backup_data["data"]["admin_account_active"] = True
+                    print(f"   ⚠️ Failed to get admin status (using default)")
             except Exception as e:
-                print(f"   ❌ Error backing up admin account: {e}")
+                print(f"   ⚠️ Error backing up admin account (using default): {e}")
                 backup_data["data"]["admin_account_active"] = True
             
             # 4. Backup Audit Policy
@@ -89,15 +92,17 @@ class RollbackManager:
                     print(f"   ✓ Audit policy backed up")
                 else:
                     backup_data["data"]["audit_logon"] = {"success": "No Auditing", "failure": "No Auditing"}
+                    print(f"   ⚠️ Failed to get audit policy (using default)")
             except Exception as e:
-                print(f"   ❌ Error backing up audit policy: {e}")
+                print(f"   ⚠️ Error backing up audit policy (using default): {e}")
                 backup_data["data"]["audit_logon"] = {"success": "No Auditing", "failure": "No Auditing"}
             
             # Thêm thông tin cơ bản về backup
             backup_data["data"]["backup_info"] = {
                 "backup_time": str(datetime.utcnow()),
                 "host": host,
-                "notes": "Backup created before remediation"
+                "notes": "Backup created before remediation - Only security policy settings",
+                "backup_scope": "Limited - Security policies only (NOT full system backup)"
             }
             
             # Save to MongoDB

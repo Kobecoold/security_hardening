@@ -617,7 +617,7 @@ async def remediate_linux(
         if not script_content:
             raise HTTPException(status_code=404, detail=f"Không tìm thấy remediation script cho rule: {Rule_id}")
         
-        # Chạy script remediation
+        # Chạy script remediation với timeout 5 phút (300 giây)
         print("🚀 Running remediation script...")
         ssh_exec = ssh_connect(Host, Username, Key_path or "", password=Password)
         try:
@@ -626,6 +626,7 @@ async def remediate_linux(
                 script_content,
                 use_sudo=Use_sudo,
                 sudo_password=Sudo_password,
+                timeout=300,  # 5 minutes timeout
             )
         finally:
             ssh_exec.close()

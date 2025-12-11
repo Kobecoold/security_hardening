@@ -112,11 +112,61 @@ def filter_rules(
 
 
 def load_remediation_script(os_name: str, rule_id: str) -> Optional[str]:
-    """Load remediation script từ file system theo rule_id."""
-    script_path = os.path.join(SCRIPTS_DIR, os_name, f"{rule_id}.sh")
-    if os.path.exists(script_path):
-        with open(script_path, "r", encoding="utf-8") as f:
+    """
+    Load remediation script từ file system theo rule_id.
+    
+    Rule ID format: cis-ubuntu-20.04-1.1.3
+    Script file format: cis-1.1.3-nosuid-tmp.sh
+    
+    Logic:
+    1. Tìm file với tên chính xác rule_id.sh
+    2. Parse rule_id để extract version (1.1.3) và tìm file cis-{version}-*.sh
+    """
+    import glob
+    import re
+    
+    script_dir = os.path.join(SCRIPTS_DIR, os_name)
+    
+    if not os.path.exists(script_dir):
+        print(f"⚠️ Script directory not found: {script_dir}")
+        return None
+    
+    # Thử 1: Tìm file với tên chính xác rule_id.sh
+    exact_path = os.path.join(script_dir, f"{rule_id}.sh")
+    if os.path.exists(exact_path):
+        print(f"✅ Found exact match: {rule_id}.sh")
+        with open(exact_path, "r", encoding="utf-8") as f:
             return f.read()
+    
+    # Thử 2: Parse rule_id để extract CIS version number
+    # Format examples:
+    #   cis-ubuntu-20.04-1.1.3 -> extract 1.1.3
+    #   cis-ubuntu-20.04-2.2.7 -> extract 2.2.7
+    #   cis-1.1.3-xxx -> extract 1.1.3
+    
+    # Pattern để tìm version: số.số.số (có thể có nhiều số)
+    version_match = re.search(r'(\d+\.\d+\.\d+)', rule_id)
+    if version_match:
+        version_part = version_match.group(1)
+        # Tìm file theo pattern: cis-{version}-*.sh
+        pattern = os.path.join(script_dir, f"cis-{version_part}-*.sh")
+        matches = glob.glob(pattern)
+        if matches:
+            # Lấy file đầu tiên match
+            script_path = matches[0]
+            script_name = os.path.basename(script_path)
+            print(f"✅ Found script by version match: {script_name} for rule {rule_id}")
+            with open(script_path, "r", encoding="utf-8") as f:
+                return f.read()
+    
+    # Thử 3: List tất cả scripts và tìm match tốt nhất
+    all_scripts = glob.glob(os.path.join(script_dir, "cis-*.sh"))
+    if all_scripts:
+        print(f"⚠️ Direct match failed. Found {len(all_scripts)} scripts in {script_dir}")
+        print(f"   Rule ID: {rule_id}")
+        print(f"   Available scripts: {[os.path.basename(s) for s in all_scripts[:5]]}...")
+    
+    print(f"❌ Script not found for rule {rule_id} in {script_dir}")
     return None
 
 def load_windows_remediation_script(script_name: str) -> Optional[str]:
