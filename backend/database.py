@@ -138,6 +138,18 @@ class AuditDB:
             "by_os": stats,
             "overall_avg_compliance": round(overall_avg, 2)
         }
+    
+    def get_audit_by_id(self, audit_id: str) -> Optional[Dict]:
+        """Lấy audit report theo audit_id"""
+        return self.audits.find_one({"audit_id": audit_id})
+    
+    def get_backups_by_os_type(self, os_type: str, limit: int = 50) -> List[Dict]:
+        """Lấy danh sách backups theo os_type"""
+        return list(self.backups.find({"os_type": os_type}, sort=[("timestamp", -1)]).limit(limit))
+    
+    def get_backups_not_linux(self, limit: int = 50) -> List[Dict]:
+        """Lấy danh sách backups không phải Linux (Windows)"""
+        return list(self.backups.find({"os_type": {"$ne": "linux"}}, sort=[("timestamp", -1)]).limit(limit))
 
 # Kết nối đến MongoDB Docker container
 db = AuditDB()

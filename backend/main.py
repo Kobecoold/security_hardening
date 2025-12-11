@@ -12,6 +12,7 @@ from datetime import datetime
 from utils import load_rules, load_rules_by_os, load_remediation_script, load_windows_remediation_script
 from linux_audit import detect_os, ssh_connect, run_bash_check_stdin, truncate_output, get_linux_host_info
 from windows_audit import winrm_connect, run_winrm_audit, get_windows_host_info, detect_os_windows
+from auth import auth_manager, RequireAuth
 
 
 app = FastAPI(
@@ -22,73 +23,39 @@ app = FastAPI(
     },
 )
 
-@app.post("/audit/auto-detect")
-async def audit_auto_detect(
-    host: str = Form(...),
-    username: str = Form(""),
-    key_path: Optional[str] = Form(None),
-    password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
-    use_sudo: bool = Form(False),
-    sudo_password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
-):
-    """Tự động phát hiện OS và chạy audit phù hợp."""
-    try:
-        print(f"🔍 Auto-detecting OS for host: {host}")
-        
-        # Thử SSH trước (Linux)
-        try:
-            print("🔄 Attempting SSH connection...")
-            ssh = ssh_connect(host, username, key_path or "", password=password)
-            detected_os = detect_os(ssh)
-            ssh.close()
-            
-            if detected_os:
-                print(f"✅ Detected Linux OS: {detected_os}")
-                # Chuyển hướng đến audit Linux
-                return await audit_linux_json(
-                    Host=host,
-                    Username=username,
-                    Key_path=key_path,
-                    Password=password,
-                    Use_sudo=use_sudo,
-                    Sudo_password=sudo_password
-                )
-        except Exception as ssh_error:
-            print(f"❌ SSH failed: {ssh_error}")
-        
-        # Thử WinRM (Windows)
-        try:
-            print("🔄 Attempting WinRM connection...")
-            session = winrm_connect(host, "Window", password or "window")
-            host_info = get_windows_host_info(session)
-            
-            if host_info["status"] == "SUCCESS":
-                print(f"✅ Detected Windows OS: {host_info['os_type']} - Hostname: {host_info['hostname']}")
-                # Chuyển hướng đến audit Windows
-                return await audit_windows_winrm(
-                    host=host,
-                    username="Window",
-                    password=password or "window"
-                )
-            else:
-                print(f"❌ WinRM connection failed: {host_info['error']}")
-                
-        except Exception as winrm_error:
-            print(f"❌ WinRM failed: {winrm_error}")
-        
-        # Nếu cả hai đều thất bại
-        raise HTTPException(
-            status_code=400,
-            detail="Không thể tự động nhận diện OS. Vui lòng kiểm tra: "
-                   "1. Kết nối mạng, 2. Thông tin đăng nhập, 3. Dịch vụ SSH/WinRM"
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Auto-detection error: {str(e)}")
+@app.get("/")
+async def root():
+    """Root endpoint - API information and quick links."""
+    return {
+        "name": "Security Hardening Agentless API",
+        "version": "1.0.0",
+        "description": "API for agentless security hardening audit and remediation",
+        "docs": "/docs",
+        "health": "/healthz",
+        "version_endpoint": "/version",
+        "endpoints": {
+            "audit": {
+                "linux": "/audit/linux",
+                "windows": "/audit/windows"
+            },
+            "remediation": {
+                "linux": "/remediate/linux",
+                "windows": "/remediate/windows"
+            },
+            "rollback": {
+                "linux": "/rollback/linux",
+                "windows": "/rollback/windows"
+            },
+            "reports": {
+                "audits": "/reports/audits",
+                "remediations": "/reports/remediations",
+                "hosts": "/reports/hosts",
+                "compliance_stats": "/reports/compliance-stats"
+            }
+        }
+    }
 
-@app.post("/audit/windows")
+@app.post("/audit/windows", dependencies=[RequireAuth])
 async def audit_windows_winrm(
     host: str = Form(...),
     username: str = Form("Window"),
@@ -96,21 +63,67 @@ async def audit_windows_winrm(
 ):
     """Audit Windows using WinRM - Lưu kết quả vào MongoDB."""
     try:
+        print(f"🔍 Starting Windows audit for host: {host}")
+        
         # Kết nối WinRM
-        session = winrm_connect(host, username, password)
+        try:
+            print(f"🔄 Connecting to WinRM: {host} with user: {username}")
+            session = winrm_connect(host, username, password)
+            print("✅ WinRM connection established")
+        except Exception as conn_error:
+            error_msg = f"WinRM connection failed: {str(conn_error)}"
+            print(f"❌ {error_msg}")
+            raise HTTPException(status_code=400, detail=error_msg)
         
         # Lấy thông tin host
-        host_info = get_windows_host_info(session)
-        if host_info["status"] != "SUCCESS":
-            raise HTTPException(status_code=400, detail=f"WinRM connection failed: {host_info['error']}")
+        try:
+            host_info = get_windows_host_info(session)
+            if host_info["status"] != "SUCCESS":
+                error_msg = f"WinRM connection failed: {host_info.get('error', 'Unknown error')}"
+                print(f"❌ {error_msg}")
+                raise HTTPException(status_code=400, detail=error_msg)
+            print(f"✅ Host info retrieved: {host_info.get('hostname')} - {host_info.get('os_type')}")
+        except HTTPException:
+            raise
+        except Exception as info_error:
+            error_msg = f"Failed to get host info: {str(info_error)}"
+            print(f"❌ {error_msg}")
+            raise HTTPException(status_code=400, detail=error_msg)
         
-        # Load rules WinRM
-        rules = load_rules()
+        # Load rules WinRM theo OS type
+        try:
+            print("📄 Loading Windows rules...")
+            rules = load_rules(os_type=host_info.get("os_type"))
+            print(f"✅ Loaded {len(rules)} rules")
+        except Exception as rules_error:
+            error_msg = f"Failed to load rules: {str(rules_error)}"
+            print(f"❌ {error_msg}")
+            raise HTTPException(status_code=500, detail=error_msg)
         
         # Chạy audit
+        print("🚀 Running audit checks...")
         audit_results = []
-        for rule in rules:
-            audit_results.append(run_winrm_audit(session, rule))
+        for i, rule in enumerate(rules, 1):
+            try:
+                print(f"  [{i}/{len(rules)}] Checking: {rule.get('id', 'unknown')} - {rule.get('title', 'No title')}")
+                result = run_winrm_audit(session, rule)
+                audit_results.append(result)
+            except Exception as rule_error:
+                print(f"  ⚠️ Error checking rule {rule.get('id', 'unknown')}: {str(rule_error)}")
+                # Thêm error result thay vì fail toàn bộ
+                audit_results.append({
+                    "id": rule.get("id", "unknown"),
+                    "title": rule.get("title", "Unknown"),
+                    "status": "ERROR",
+                    "error": str(rule_error),
+                    "command": rule.get("check", {}).get("winrm", "N/A"),
+                    "result": "",
+                    "expected": rule.get("check", {}).get("expected", "N/A"),
+                    "exit_code": -1,
+                    "duration_ms": 0
+                })
+        
+        print(f"✅ Audit completed: {len(audit_results)} results")
         
         # Chuẩn bị dữ liệu audit để lưu vào MongoDB
         audit_data = {
@@ -125,7 +138,29 @@ async def audit_windows_winrm(
         }
         
         # LƯU VÀO MONGODB - collection: audit_reports
-        audit_id = db.save_audit_report(audit_data)
+        try:
+            print("💾 Saving audit results to MongoDB...")
+            audit_id = db.save_audit_report(audit_data)
+            print(f"✅ Audit saved to MongoDB: {audit_id}")
+        except Exception as db_error:
+            error_msg = f"MongoDB save failed: {str(db_error)}"
+            print(f"❌ {error_msg}")
+            # Vẫn trả về kết quả nhưng không có audit_id
+            return {
+                "audit_id": None,
+                "warning": "Results not saved to MongoDB",
+                "error": error_msg,
+                "client_type": "windows",
+                "protocol": "winrm",
+                "host": host,
+                "hostname": host_info["hostname"],
+                "os_type": host_info["os_type"],
+                "benchmark": "CIS Windows 10 Level 1",
+                "total_rules": len(audit_results),
+                "compliance_score": audit_data.get("compliance_score", 0),
+                "connection_info": host_info,
+                "results": audit_results
+            }
         
         return {
             "audit_id": audit_id,  # ID từ MongoDB
@@ -141,8 +176,14 @@ async def audit_windows_winrm(
             "results": audit_results
         }
     
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        error_msg = f"Unexpected error: {str(e)}"
+        print(f"❌ {error_msg}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=error_msg)
 
 @app.get("/rules")
 async def get_rules(os_name: Optional[str] = None):
@@ -154,7 +195,7 @@ async def get_rules(os_name: Optional[str] = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/audit/linux")
+@app.post("/audit/linux", dependencies=[RequireAuth])
 async def audit_linux_json(
     Host: str = Form(...),
     Username: str = Form(""),
@@ -213,8 +254,8 @@ async def audit_linux_json(
                 except Exception:
                     pass
             duration_ms = int((time.time() - started) * 1000)
-            tout = truncate_output(exec_result["stdout"]) 
-            terr = truncate_output(exec_result["stderr"]) 
+            tout_dict = truncate_output(exec_result["stdout"]) 
+            terr_dict = truncate_output(exec_result["stderr"]) 
             return {
                 "id": rule.get("id"),
                 "title": rule.get("title"),
@@ -223,8 +264,12 @@ async def audit_linux_json(
                 "needs_sudo": effective_use_sudo,
                 "exit_status": exec_result["exit_status"],
                 "status": exec_result["status"],
-                "stdout": tout,
-                "stderr": terr,
+                "stdout": tout_dict.get("text", ""),
+                "stdout_truncated": tout_dict.get("truncated", False),
+                "stdout_sha256": tout_dict.get("sha256"),
+                "stderr": terr_dict.get("text", ""),
+                "stderr_truncated": terr_dict.get("truncated", False),
+                "stderr_sha256": terr_dict.get("sha256"),
                 "duration_ms": duration_ms,
                 "started_at": int(started * 1000),
             }
@@ -254,7 +299,13 @@ async def audit_linux_json(
         }
 
         # LƯU VÀO MONGODB - collection: audit_reports
-        audit_id = db.save_audit_report(audit_data)
+        try:
+            print("💾 Saving audit results to MongoDB...")
+            audit_id = db.save_audit_report(audit_data)
+            print(f"✅ Audit saved to MongoDB: {audit_id}")
+        except Exception as db_error:
+            print(f"⚠️ MongoDB save failed (non-critical): {db_error}")
+            audit_id = None
 
         return {
             "audit_id": audit_id,  # ID từ MongoDB
@@ -270,8 +321,14 @@ async def audit_linux_json(
             "connection_info": host_info,
             "results": results
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        error_msg = f"Linux audit failed: {str(e)}"
+        print(f"❌ {error_msg}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=error_msg)
 
 @app.get("/healthz")
 async def healthz():
@@ -279,7 +336,7 @@ async def healthz():
     return {"status": "ok"}
 
 # SỬA ENDPOINT REMEDIATION ĐỂ TỰ ĐỘNG TẠO BACKUP
-@app.post("/remediate/windows")
+@app.post("/remediate/windows", dependencies=[RequireAuth])
 async def remediate_windows(
     host: str = Form(...),
     username: str = Form("Window"),
@@ -294,6 +351,12 @@ async def remediate_windows(
         # Kết nối WinRM (dùng hàm cũ đã hoạt động)
         session = winrm_connect(host, username, password)
         print("✅ WinRM connection established")
+        
+        # Lấy thông tin host để có os_type (dùng cho cả backup và remediation)
+        host_info = get_windows_host_info(session)
+        if host_info["status"] != "SUCCESS":
+            raise HTTPException(status_code=400, detail=f"WinRM connection failed: {host_info.get('error', 'Unknown error')}")
+        os_type = host_info.get("os_type", "windows-unknown")
         
         backup_id = None
         
@@ -312,23 +375,40 @@ async def remediate_windows(
         
         # Load script từ file
         print(f"📄 Loading script: {script_name}")
-        script_content = load_windows_remediation_script(script_name)
-        if not script_content:
-            raise HTTPException(status_code=404, detail=f"Remediation script not found: {script_name}")
+        try:
+            script_content = load_windows_remediation_script(script_name)
+            if not script_content:
+                raise HTTPException(status_code=404, detail=f"Remediation script not found: {script_name}. Check if file exists in scripts/remediation/window-10/")
+        except Exception as load_error:
+            error_msg = f"Failed to load script {script_name}: {str(load_error)}"
+            print(f"❌ {error_msg}")
+            raise HTTPException(status_code=500, detail=error_msg)
         
         # Chạy script remediation
         print("🚀 Running remediation script...")
-        result = session.run_ps(script_content)
+        try:
+            result = session.run_ps(script_content)
+        except Exception as exec_error:
+            error_msg = f"Failed to execute PowerShell script: {str(exec_error)}"
+            print(f"❌ {error_msg}")
+            raise HTTPException(status_code=500, detail=error_msg)
         
-        output = result.std_out.decode('utf-8', errors='ignore')
-        error = result.std_err.decode('utf-8', errors='ignore')
+        # Normalize line endings và decode output
+        output = result.std_out.decode('utf-8', errors='ignore').replace('\r\n', '\n').replace('\r', '\n').strip()
+        error = result.std_err.decode('utf-8', errors='ignore').replace('\r\n', '\n').replace('\r', '\n').strip()
         
         print(f"📊 Script result - Exit code: {result.status_code}")
+        if output:
+            print(f"   Output length: {len(output)} characters")
+        if error:
+            print(f"   Error output: {error[:200]}...")
         
         # Chuẩn bị dữ liệu remediation để lưu vào MongoDB
         remediation_data = {
             "host": host,
             "username": username,
+            "os_type": os_type,
+            "client_type": "windows",
             "script_used": script_name,
             "backup_id": backup_id,
             "status": "SUCCESS" if result.status_code == 0 else "PARTIAL",
@@ -340,28 +420,38 @@ async def remediate_windows(
         }
         
         # LƯU VÀO MONGODB
-        remediation_id = db.save_remediation_log(remediation_data)
+        try:
+            print("💾 Saving remediation log to MongoDB...")
+            remediation_id = db.save_remediation_log(remediation_data)
+            print(f"✅ Remediation log saved: {remediation_id}")
+        except Exception as db_error:
+            print(f"⚠️ MongoDB save failed (non-critical): {db_error}")
+            remediation_id = None
         
         return {
             "remediation_id": remediation_id,
             "backup_id": backup_id,
             "status": "SUCCESS" if result.status_code == 0 else "PARTIAL",
             "host": host,
+            "os_type": os_type,
             "script_used": script_name,
             "exit_code": result.status_code,
-            "output": output[:1000],
-            "error": error[:1000],
-            "message": f"Remediation script '{script_name}' executed successfully",
+            "output": output[:1000] if output else "",
+            "error": error[:1000] if error else "",
+            "message": f"Remediation script '{script_name}' executed successfully" if result.status_code == 0 else f"Remediation script '{script_name}' completed with exit code {result.status_code}",
             "rollback_available": backup_id is not None
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"❌ Remediation failed: {e}")
+        error_msg = f"Remediation failed: {str(e)}"
+        print(f"❌ {error_msg}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=error_msg)
 
-@app.post("/rollback/windows")
+@app.post("/rollback/windows", dependencies=[RequireAuth])
 async def rollback_windows(
     host: str = Form(...),
     username: str = Form("Window"),  # SỬA: "Administrator" → "Window"
@@ -378,26 +468,28 @@ async def rollback_windows(
         result = rollback_manager.execute_rollback(host, session, backup_id)
         
         return {
-            "status": "SUCCESS",
-            "message": "Rollback completed successfully",
+            "status": result.get("status", "SUCCESS"),
+            "message": result.get("message", "Rollback completed successfully"),
             "host": host,
-            "backup_id": result["backup_id"],
-            "rollback_details": result["rollback_details"]
+            "backup_id": result.get("backup_id"),
+            "rollback_details": result.get("rollback_details", {})
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ Rollback failed: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/backups/windows")
+@app.get("/backups/windows", dependencies=[RequireAuth])
 async def get_windows_backups(host: Optional[str] = None):
     """Lấy danh sách backups Windows."""
     try:
         if host:
             backups = rollback_manager.get_backups(host)
         else:
-            backups = list(db.backups.find({"os_type": {"$ne": "linux"}}, sort=[("timestamp", -1)]).limit(50))
+            backups = db.get_backups_not_linux(limit=50)
             for backup in backups:
                 backup["_id"] = str(backup["_id"])
         
@@ -405,7 +497,7 @@ async def get_windows_backups(host: Optional[str] = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/rollback/linux")
+@app.post("/rollback/linux", dependencies=[RequireAuth])
 async def rollback_linux(
     Host: str = Form(...),
     Username: str = Form(""),
@@ -435,14 +527,14 @@ async def rollback_linux(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/backups/linux")
+@app.get("/backups/linux", dependencies=[RequireAuth])
 async def get_linux_backups(host: Optional[str] = None):
     """Lấy danh sách backups Linux."""
     try:
         if host:
             backups = linux_rollback_manager.get_backups(host)
         else:
-            backups = list(db.backups.find({"os_type": "linux"}, sort=[("timestamp", -1)]).limit(50))
+            backups = db.get_backups_by_os_type("linux", limit=50)
             for backup in backups:
                 backup["_id"] = str(backup["_id"])
         
@@ -450,7 +542,7 @@ async def get_linux_backups(host: Optional[str] = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/remediate/linux")
+@app.post("/remediate/linux", dependencies=[RequireAuth])
 async def remediate_linux(
     Host: str = Form(...),
     Username: str = Form(""),
@@ -530,7 +622,13 @@ async def remediate_linux(
         }
         
         # LƯU VÀO MONGODB
-        remediation_id = db.save_remediation_log(remediation_data)
+        try:
+            print("💾 Saving remediation log to MongoDB...")
+            remediation_id = db.save_remediation_log(remediation_data)
+            print(f"✅ Remediation log saved: {remediation_id}")
+        except Exception as db_error:
+            print(f"⚠️ MongoDB save failed (non-critical): {db_error}")
+            remediation_id = None
         
         return {
             "remediation_id": remediation_id,
@@ -554,7 +652,7 @@ async def remediate_linux(
 
 # ==================== REPORTING ENDPOINTS ====================
 
-@app.get("/reports/audits")
+@app.get("/reports/audits", dependencies=[RequireAuth])
 async def get_audit_reports(
     host: Optional[str] = None,
     limit: int = 50,
@@ -585,7 +683,7 @@ async def get_audit_reports(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/reports/remediations")
+@app.get("/reports/remediations", dependencies=[RequireAuth])
 async def get_remediation_reports(
     host: Optional[str] = None,
     limit: int = 50
@@ -610,7 +708,7 @@ async def get_remediation_reports(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/reports/hosts")
+@app.get("/reports/hosts", dependencies=[RequireAuth])
 async def get_hosts_overview():
     """
     Lấy overview của tất cả hosts từ MongoDB.
@@ -631,7 +729,7 @@ async def get_hosts_overview():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/reports/compliance-stats")
+@app.get("/reports/compliance-stats", dependencies=[RequireAuth])
 async def get_compliance_statistics():
     """
     Lấy thống kê compliance tổng thể từ MongoDB.
@@ -644,7 +742,7 @@ async def get_compliance_statistics():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/reports/audits/{audit_id}")
+@app.get("/reports/audits/{audit_id}", dependencies=[RequireAuth])
 async def get_audit_detail(audit_id: str):
     """
     Lấy chi tiết một audit report cụ thể từ MongoDB.
@@ -652,7 +750,7 @@ async def get_audit_detail(audit_id: str):
     Collection: audit_reports
     """
     try:
-        audit = db.audits.find_one({"audit_id": audit_id})
+        audit = db.get_audit_by_id(audit_id)
         if not audit:
             raise HTTPException(status_code=404, detail="Audit report not found")
         
@@ -663,6 +761,44 @@ async def get_audit_detail(audit_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ==================== AUTHENTICATION ENDPOINTS ====================
+
+@app.post("/auth/api-keys", dependencies=[RequireAuth])
+async def create_api_key(
+    name: str = Form(...),
+    description: str = Form(""),
+    expires_days: Optional[int] = Form(None),
+):
+    """Tạo API key mới. Yêu cầu authentication để tạo key mới."""
+    try:
+        result = auth_manager.generate_api_key(name, description, expires_days)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/auth/api-keys", dependencies=[RequireAuth])
+async def list_api_keys():
+    """Lấy danh sách API keys (không hiển thị key thực tế)."""
+    try:
+        keys = auth_manager.list_api_keys()
+        return {"total": len(keys), "keys": keys}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/auth/api-keys/{api_key_hash}", dependencies=[RequireAuth])
+async def revoke_api_key(api_key_hash: str):
+    """Vô hiệu hóa API key."""
+    try:
+        success = auth_manager.revoke_api_key(api_key_hash)
+        if success:
+            return {"status": "success", "message": "API key revoked successfully"}
+        else:
+            raise HTTPException(status_code=404, detail="API key not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/version")
 async def version():

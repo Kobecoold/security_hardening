@@ -1,0 +1,15 @@
+id: cis-ubuntu-20.04-1.1.1
+os: ubuntu-20.04
+title: Ensure separate partition exists for /tmp
+benchmark: CIS Ubuntu 20.04 LTS
+level: 1
+description: Ensure /tmp is mounted on a separate partition
+needs_sudo: false
+check:
+  bash: |
+    mount | grep -E '\s/tmp\s' | grep -v nodev
+references:
+  - https://ubuntu.com/security/cis
+controls:
+  - CIS 1.1.1
+

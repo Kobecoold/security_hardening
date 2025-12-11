@@ -1,0 +1,15 @@
+id: cis-ubuntu-20.04-4.1.1
+os: ubuntu-20.04
+title: Ensure auditd is installed
+benchmark: CIS Ubuntu 20.04 LTS
+level: 1
+description: Ensure auditd is installed
+needs_sudo: false
+check:
+  bash: |
+    dpkg -s auditd 2>/dev/null | grep -q "Status: install"
+references:
+  - https://ubuntu.com/security/cis
+controls:
+  - CIS 4.1.1
+

@@ -27,6 +27,7 @@ class RollbackManager:
                 "host": host,
                 "timestamp": datetime.utcnow(),
                 "type": "pre_remediation_backup",
+                "os_type": "windows",
                 "backup_id": f"backup_{int(datetime.utcnow().timestamp())}",
                 "data": {}
             }

@@ -1,0 +1,15 @@
+id: cis-ubuntu-20.04-1.7.1
+os: ubuntu-20.04
+title: Ensure message of the day is configured properly
+benchmark: CIS Ubuntu 20.04 LTS
+level: 1
+description: Ensure message of the day (MOTD) permissions are configured
+needs_sudo: false
+check:
+  bash: |
+    [ -f /etc/motd ] && stat -L -c "%a %u %g" /etc/motd | grep -E "^644 0 0$"
+references:
+  - https://ubuntu.com/security/cis
+controls:
+  - CIS 1.7.1
+

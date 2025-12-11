@@ -1,0 +1,15 @@
+id: cis-ubuntu-20.04-3.2.6
+os: ubuntu-20.04
+title: Ensure bogus ICMP responses are ignored
+benchmark: CIS Ubuntu 20.04 LTS
+level: 1
+description: Ensure bogus ICMP responses are ignored
+needs_sudo: false
+check:
+  bash: |
+    sysctl net.ipv4.icmp_ignore_bogus_error_responses | grep -q "net.ipv4.icmp_ignore_bogus_error_responses = 1"
+references:
+  - https://ubuntu.com/security/cis
+controls:
+  - CIS 3.2.6
+

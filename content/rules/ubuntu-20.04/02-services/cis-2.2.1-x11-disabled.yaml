@@ -1,0 +1,15 @@
+id: cis-ubuntu-20.04-2.2.1
+os: ubuntu-20.04
+title: Ensure X Window System is not installed
+benchmark: CIS Ubuntu 20.04 LTS
+level: 1
+description: Ensure X Window System is not installed on server systems
+needs_sudo: false
+check:
+  bash: |
+    ! dpkg -l | grep -E "^ii\s+xserver-xorg" | grep -q xserver
+references:
+  - https://ubuntu.com/security/cis
+controls:
+  - CIS 2.2.1
+

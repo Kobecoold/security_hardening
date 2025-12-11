@@ -1,0 +1,15 @@
+id: cis-ubuntu-20.04-4.1.2
+os: ubuntu-20.04
+title: Ensure auditd service is enabled
+benchmark: CIS Ubuntu 20.04 LTS
+level: 1
+description: Ensure auditd service is enabled and running
+needs_sudo: false
+check:
+  bash: |
+    systemctl is-enabled auditd | grep -q enabled && systemctl is-active auditd | grep -q active
+references:
+  - https://ubuntu.com/security/cis
+controls:
+  - CIS 4.1.2
+

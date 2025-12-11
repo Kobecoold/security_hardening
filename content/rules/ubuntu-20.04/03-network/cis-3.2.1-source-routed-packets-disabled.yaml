@@ -1,0 +1,15 @@
+id: cis-ubuntu-20.04-3.2.1
+os: ubuntu-20.04
+title: Ensure source routed packets are not accepted
+benchmark: CIS Ubuntu 20.04 LTS
+level: 1
+description: Ensure source routed packets are not accepted
+needs_sudo: false
+check:
+  bash: |
+    sysctl net.ipv4.conf.all.accept_source_route | grep -q "net.ipv4.conf.all.accept_source_route = 0"
+references:
+  - https://ubuntu.com/security/cis
+controls:
+  - CIS 3.2.1
+
