@@ -871,7 +871,7 @@ async def delete_api_key(api_key_hash: str):
 
 @app.delete("/auth/api-keys", dependencies=[RequireAuth])
 async def clear_all_api_keys():
-    """Xóa tất cả API keys (RESET - cẩn thận!)."""
+    """Xóa tất cả API keys (RESET - cẩn thận!). Yêu cầu authentication."""
     try:
         deleted_count = auth_manager.delete_all_api_keys()
         return {
@@ -880,6 +880,34 @@ async def clear_all_api_keys():
             "deleted_count": deleted_count,
             "warning": "⚠️ You can now use /auth/setup to create a new first API key"
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/auth/reset")
+async def reset_all_api_keys(
+    confirm: str = Form(..., description="Nhập 'RESET_ALL_KEYS' để xác nhận")
+):
+    """
+    Reset tất cả API keys (KHÔNG CẦN AUTHENTICATION).
+    Chỉ dùng khi bạn không có API key nào hoặc cần reset hoàn toàn.
+    Yêu cầu xác nhận bằng cách nhập 'RESET_ALL_KEYS'.
+    """
+    try:
+        if confirm != "RESET_ALL_KEYS":
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid confirmation. Must enter 'RESET_ALL_KEYS' to confirm."
+            )
+        
+        deleted_count = auth_manager.delete_all_api_keys()
+        return {
+            "status": "success",
+            "message": f"All API keys deleted ({deleted_count} keys removed)",
+            "deleted_count": deleted_count,
+            "warning": "⚠️ You can now use /auth/setup to create a new first API key"
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
