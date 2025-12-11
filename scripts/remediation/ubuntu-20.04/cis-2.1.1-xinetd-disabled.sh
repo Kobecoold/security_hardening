@@ -32,3 +32,12 @@ else
     echo "ℹ️ xinetd is not installed"
 fi
 
+# VERIFY: Check if fix was successful
+if ! dpkg -s xinetd 2>/dev/null | grep -q "Status: install"; then
+    echo "✅ VERIFIED: xinetd is not installed - FIXED"
+    exit 0
+else
+    echo "❌ VERIFICATION FAILED: xinetd is still installed"
+    exit 1
+fi
+

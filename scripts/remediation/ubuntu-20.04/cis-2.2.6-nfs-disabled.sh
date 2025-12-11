@@ -36,3 +36,12 @@ else
     echo "ℹ️ NFS server is not installed (service disabled)"
 fi
 
+# VERIFY: Check if fix was successful
+if ! systemctl is-enabled nfs-server 2>/dev/null | grep -q enabled; then
+    echo "✅ VERIFIED: NFS server is disabled - FIXED"
+    exit 0
+else
+    echo "❌ VERIFICATION FAILED: NFS server is still enabled"
+    exit 1
+fi
+

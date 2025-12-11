@@ -36,3 +36,12 @@ else
     echo "ℹ️ CUPS is not installed (service disabled)"
 fi
 
+# VERIFY: Check if fix was successful
+if ! systemctl is-enabled cups 2>/dev/null | grep -q enabled; then
+    echo "✅ VERIFIED: CUPS is disabled - FIXED"
+    exit 0
+else
+    echo "❌ VERIFICATION FAILED: CUPS is still enabled"
+    exit 1
+fi
+

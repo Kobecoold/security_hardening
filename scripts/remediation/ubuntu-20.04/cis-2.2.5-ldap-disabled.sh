@@ -36,3 +36,12 @@ else
     echo "ℹ️ LDAP server is not installed (service disabled)"
 fi
 
+# VERIFY: Check if fix was successful
+if ! systemctl is-enabled slapd 2>/dev/null | grep -q enabled; then
+    echo "✅ VERIFIED: LDAP server is disabled - FIXED"
+    exit 0
+else
+    echo "❌ VERIFICATION FAILED: LDAP server is still enabled"
+    exit 1
+fi
+

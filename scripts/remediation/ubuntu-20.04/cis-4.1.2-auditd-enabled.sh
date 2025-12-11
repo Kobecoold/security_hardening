@@ -34,5 +34,12 @@ fi
 timeout 30 systemctl enable auditd 2>/dev/null || true
 timeout 30 systemctl start auditd 2>/dev/null || true
 
-echo "✅ auditd service enabled and started"
+# VERIFY: Check if fix was successful
+if systemctl is-enabled auditd 2>/dev/null | grep -q enabled && systemctl is-active auditd 2>/dev/null | grep -q active; then
+    echo "✅ VERIFIED: auditd service is enabled and running - FIXED"
+    exit 0
+else
+    echo "❌ VERIFICATION FAILED: auditd service is not enabled or not running"
+    exit 1
+fi
 

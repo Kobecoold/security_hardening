@@ -36,3 +36,12 @@ else
     echo "ℹ️ DHCP Server is not installed (service disabled)"
 fi
 
+# VERIFY: Check if fix was successful
+if ! systemctl is-enabled isc-dhcp-server 2>/dev/null | grep -q enabled; then
+    echo "✅ VERIFIED: DHCP Server is disabled - FIXED"
+    exit 0
+else
+    echo "❌ VERIFICATION FAILED: DHCP Server is still enabled"
+    exit 1
+fi
+

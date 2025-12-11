@@ -33,3 +33,12 @@ else
     echo "ℹ️ auditd is already installed"
 fi
 
+# VERIFY: Check if fix was successful
+if dpkg -s auditd 2>/dev/null | grep -q "Status: install"; then
+    echo "✅ VERIFIED: auditd is installed - FIXED"
+    exit 0
+else
+    echo "❌ VERIFICATION FAILED: auditd is not installed"
+    exit 1
+fi
+

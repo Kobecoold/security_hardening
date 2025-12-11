@@ -32,3 +32,12 @@ else
     echo "ℹ️ X Window System is not installed"
 fi
 
+# VERIFY: Check if fix was successful
+if ! dpkg -l | grep -E "^ii\s+xserver-xorg" | grep -q xserver; then
+    echo "✅ VERIFIED: X Window System is not installed - FIXED"
+    exit 0
+else
+    echo "❌ VERIFICATION FAILED: X Window System is still installed"
+    exit 1
+fi
+

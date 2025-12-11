@@ -36,3 +36,12 @@ else
     echo "ℹ️ Avahi Server is not installed (service disabled)"
 fi
 
+# VERIFY: Check if fix was successful
+if ! systemctl is-enabled avahi-daemon 2>/dev/null | grep -q enabled; then
+    echo "✅ VERIFIED: Avahi Server is disabled - FIXED"
+    exit 0
+else
+    echo "❌ VERIFICATION FAILED: Avahi Server is still enabled"
+    exit 1
+fi
+

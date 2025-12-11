@@ -2,6 +2,12 @@
 # CIS 3.2.4 - Ensure suspicious packets are logged
 set -euo pipefail
 
+# Check if already fixed
+if sysctl net.ipv4.conf.all.log_martians 2>/dev/null | grep -q "net.ipv4.conf.all.log_martians = 1"; then
+    echo "✅ Suspicious packets logging is already enabled - FIXED"
+    exit 0
+fi
+
 # Set sysctl parameters
 sysctl -w net.ipv4.conf.all.log_martians=1
 sysctl -w net.ipv4.conf.default.log_martians=1
@@ -17,5 +23,12 @@ fi
 # Apply sysctl
 sysctl -p /etc/sysctl.conf >/dev/null 2>&1 || true
 
-echo "✅ Suspicious packets logging enabled"
+# VERIFY: Check if fix was successful
+if sysctl net.ipv4.conf.all.log_martians 2>/dev/null | grep -q "net.ipv4.conf.all.log_martians = 1"; then
+    echo "✅ VERIFIED: Suspicious packets logging is enabled - FIXED"
+    exit 0
+else
+    echo "❌ VERIFICATION FAILED: Suspicious packets logging is not enabled"
+    exit 1
+fi
 
