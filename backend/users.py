@@ -77,6 +77,24 @@ class UserManager:
         """Kiểm tra xem có user nào không."""
         count = self.users_collection.count_documents({})
         return count > 0
+    
+    def get_user_by_api_key_name(self, api_key_name: str) -> Optional[Dict]:
+        """Lấy user từ API key name (format: "User: username")."""
+        if not api_key_name or not api_key_name.startswith("User: "):
+            return None
+        username = api_key_name.replace("User: ", "").strip()
+        return self.get_user(username)
+    
+    def list_users(self) -> list:
+        """Lấy danh sách tất cả users."""
+        users = list(self.users_collection.find({}, {"password_hash": 0}).sort("created_at", -1))
+        for user in users:
+            user["_id"] = str(user["_id"])
+            if user.get("created_at"):
+                user["created_at"] = user["created_at"].isoformat()
+            if user.get("last_login"):
+                user["last_login"] = user["last_login"].isoformat()
+        return users
 
 # Global instance
 user_manager = UserManager()

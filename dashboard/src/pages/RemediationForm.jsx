@@ -18,7 +18,7 @@ export default function RemediationForm() {
   const [formData, setFormData] = useState({
     host: host || '',
     os_type: osType || 'linux',
-    rule_id: '',
+    rule_ids: [], // Multi-select rules
     username: '',
     key_path: '~/.ssh/id_ed25519',
     password: '',
@@ -29,14 +29,15 @@ export default function RemediationForm() {
 
   const [availableRules, setAvailableRules] = useState([])
   const [failedRules, setFailedRules] = useState([])
+  const [searchTerm, setSearchTerm] = useState('')
 
   useEffect(() => {
     if (auditId) {
       loadFailedRulesFromAudit(auditId)
-    } else if (formData.host && formData.os_type) {
+    } else if (formData.os_type) {
       loadAvailableRules()
     }
-  }, [auditId, formData.host, formData.os_type])
+  }, [auditId, formData.os_type])
 
   const loadFailedRulesFromAudit = async (auditId) => {
     try {
@@ -70,9 +71,44 @@ export default function RemediationForm() {
       setAvailableRules(rules)
     } catch (err) {
       console.error('Error loading rules:', err)
+      setError('Failed to load rules. Please check OS type.')
     } finally {
       setLoadingRules(false)
     }
+  }
+
+  const handleRuleToggle = (ruleId) => {
+    setFormData(prev => {
+      const currentIds = prev.rule_ids || []
+      if (currentIds.includes(ruleId)) {
+        return { ...prev, rule_ids: currentIds.filter(id => id !== ruleId) }
+      } else {
+        return { ...prev, rule_ids: [...currentIds, ruleId] }
+      }
+    })
+  }
+
+  const handleSelectAll = () => {
+    const filtered = getFilteredRules()
+    const allIds = filtered.map(r => r.id).filter(Boolean)
+    setFormData(prev => ({ ...prev, rule_ids: allIds }))
+  }
+
+  const handleDeselectAll = () => {
+    setFormData(prev => ({ ...prev, rule_ids: [] }))
+  }
+
+  const getFilteredRules = () => {
+    const rulesToShow = failedRules.length > 0 ? failedRules : availableRules
+    if (!searchTerm) return rulesToShow
+    return rulesToShow.filter(rule => {
+      const searchLower = searchTerm.toLowerCase()
+      return (
+        rule.id?.toLowerCase().includes(searchLower) ||
+        rule.title?.toLowerCase().includes(searchLower) ||
+        rule.description?.toLowerCase().includes(searchLower)
+      )
+    })
   }
 
   const handleChange = (e) => {
@@ -193,41 +229,77 @@ export default function RemediationForm() {
           {isLinux && (
             <>
               <div className="form-section">
-                <h2>Rule to Fix</h2>
+                <h2>Select Rules to Fix *</h2>
                 
-                {failedRules.length > 0 ? (
-                  <div className="form-group">
-                    <label htmlFor="rule_id">Select Failed Rule *</label>
-                    <select
-                      id="rule_id"
-                      name="rule_id"
-                      value={formData.rule_id}
-                      onChange={handleChange}
-                      required
-                    >
-                      <option value="">-- Select a failed rule --</option>
-                      {failedRules.map((rule) => (
-                        <option key={rule.id} value={rule.id}>
-                          {rule.id} - {rule.title}
-                        </option>
-                      ))}
-                    </select>
-                    <small>Rules from latest audit that failed</small>
+                {loadingRules ? (
+                  <div className="loading-rules">
+                    <Loader size={20} className="spinner" />
+                    <span>Loading rules...</span>
                   </div>
                 ) : (
-                  <div className="form-group">
-                    <label htmlFor="rule_id">Rule ID *</label>
-                    <input
-                      id="rule_id"
-                      name="rule_id"
-                      type="text"
-                      value={formData.rule_id}
-                      onChange={handleChange}
-                      placeholder="cis-ubuntu-20.04-5.2.4"
-                      required
-                    />
-                    <small>Enter the rule ID you want to fix</small>
-                  </div>
+                  <>
+                    <div className="rules-header">
+                      <div className="form-group">
+                        <label htmlFor="search-rules">Search Rules</label>
+                        <input
+                          id="search-rules"
+                          type="text"
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                          placeholder="Search by ID, title, or description..."
+                        />
+                      </div>
+                      <div className="rules-actions">
+                        <button type="button" onClick={handleSelectAll} className="btn-select-all">
+                          Select All
+                        </button>
+                        <button type="button" onClick={handleDeselectAll} className="btn-deselect-all">
+                          Deselect All
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="rules-selection-info">
+                      <span>
+                        {formData.rule_ids.length} rule(s) selected
+                        {failedRules.length > 0 && ' (from failed audit)'}
+                      </span>
+                    </div>
+
+                    <div className="rules-list">
+                      {getFilteredRules().length === 0 ? (
+                        <div className="no-rules">
+                          <AlertCircle size={20} />
+                          <span>No rules found. {formData.os_type ? `Try changing OS type or check if rules exist for ${formData.os_type}` : 'Please select OS type first'}</span>
+                        </div>
+                      ) : (
+                        getFilteredRules().map((rule) => {
+                          const isSelected = formData.rule_ids.includes(rule.id)
+                          return (
+                            <div key={rule.id} className={`rule-item ${isSelected ? 'selected' : ''}`}>
+                              <label className="rule-checkbox">
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => handleRuleToggle(rule.id)}
+                                />
+                                <div className="rule-info">
+                                  <div className="rule-id">{rule.id}</div>
+                                  <div className="rule-title">{rule.title || 'No title'}</div>
+                                  {rule.description && (
+                                    <div className="rule-description">{rule.description}</div>
+                                  )}
+                                  {rule.level && (
+                                    <span className="rule-level">Level: {rule.level}</span>
+                                  )}
+                                </div>
+                              </label>
+                            </div>
+                          )
+                        })
+                      )}
+                    </div>
+                  </>
                 )}
               </div>
 

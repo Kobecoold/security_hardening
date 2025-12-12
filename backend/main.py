@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException, Form
+from fastapi import FastAPI, HTTPException, Form, Depends, Security
+from fastapi.security import APIKeyHeader
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,8 +17,12 @@ from datetime import datetime
 from utils import load_rules, load_rules_by_os, load_remediation_script, load_windows_remediation_script
 from linux_audit import detect_os, ssh_connect, run_bash_check_stdin, truncate_output, get_linux_host_info
 from windows_audit import winrm_connect, run_winrm_audit, get_windows_host_info, detect_os_windows
-from auth import auth_manager, RequireAuth
+from auth import auth_manager, RequireAuth, API_KEY_HEADER
 from users import user_manager
+
+# Define API_KEY_HEADER for admin check
+if 'API_KEY_HEADER' not in globals():
+    API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 # Đường dẫn đến dashboard
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
@@ -115,7 +120,23 @@ if not os.path.exists(DASHBOARD_DIST):
         """Root endpoint - API information (fallback when dashboard not built)."""
         return await root_api_info()
 
-@app.post("/audit/windows", dependencies=[RequireAuth])
+async def require_admin(api_key: Optional[str] = Security(API_KEY_HEADER)) -> bool:
+    """Dependency để check admin role."""
+    if not api_key:
+        raise HTTPException(status_code=401, detail="API key required")
+    
+    if not auth_manager.verify_api_key(api_key):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    
+    user_info = auth_manager.get_api_key_user(api_key)
+    if not user_info or user_info.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    return True
+
+RequireAdmin = Depends(require_admin)
+
+@app.post("/audit/windows", dependencies=[RequireAdmin])
 async def audit_windows_winrm(
     host: str = Form(...),
     username: str = Form("Window"),
@@ -255,7 +276,7 @@ async def get_rules(os_name: Optional[str] = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/audit/linux", dependencies=[RequireAuth])
+@app.post("/audit/linux", dependencies=[RequireAdmin])
 async def audit_linux_json(
     Host: str = Form(...),
     Username: str = Form(""),
@@ -1057,15 +1078,25 @@ async def register_user(
     password: str = Form(..., json_schema_extra={"format": "password"}),
     email: str = Form(""),
     role: str = Form("user"),
+    api_key: Optional[str] = Form(None),
 ):
-    """Đăng ký user mới (chỉ khi chưa có user nào)."""
+    """Đăng ký user mới. Admin only hoặc first user."""
     try:
-        # Chỉ cho phép đăng ký user đầu tiên nếu chưa có user nào
-        if user_manager.has_any_users():
-            raise HTTPException(
-                status_code=403,
-                detail="Users already exist. Please contact administrator."
-            )
+        # Check if this is the first user (no auth required)
+        is_first_user = not user_manager.has_any_users()
+        
+        # If not first user, require admin authentication
+        if not is_first_user:
+            if not api_key:
+                raise HTTPException(status_code=401, detail="API key required for creating users")
+            
+            if not auth_manager.verify_api_key(api_key):
+                raise HTTPException(status_code=401, detail="Invalid API key")
+            
+            # Check if user is admin
+            user_info = auth_manager.get_api_key_user(api_key)
+            if not user_info or user_info.get("role") != "admin":
+                raise HTTPException(status_code=403, detail="Only admins can create users")
         
         user = user_manager.create_user(username, password, email, role)
         return {
@@ -1075,6 +1106,15 @@ async def register_user(
         }
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/auth/users", dependencies=[RequireAuth])
+async def list_users():
+    """Lấy danh sách users. Admin only."""
+    try:
+        users = user_manager.list_users()
+        return {"total": len(users), "users": users}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

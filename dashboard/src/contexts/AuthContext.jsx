@@ -15,10 +15,22 @@ export function AuthProvider({ children }) {
   const [apiKey, setApiKey] = useState(null)
   const [loading, setLoading] = useState(true)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [userRole, setUserRole] = useState(null)
 
   useEffect(() => {
-    // Load API key from localStorage
+    // Load API key and user info from localStorage
     const savedKey = localStorage.getItem('api_key')
+    const savedUserInfo = localStorage.getItem('user_info')
+    
+    if (savedUserInfo) {
+      try {
+        const userInfo = JSON.parse(savedUserInfo)
+        setUserRole(userInfo.role || 'user')
+      } catch (e) {
+        console.error('Error parsing user info:', e)
+      }
+    }
+    
     if (savedKey) {
       setApiKey(savedKey)
       api.setApiKey(savedKey)
@@ -128,6 +140,7 @@ export function AuthProvider({ children }) {
         localStorage.setItem('api_key', apiKey)
         if (response.data.user) {
           localStorage.setItem('user_info', JSON.stringify(response.data.user))
+          setUserRole(response.data.user.role || 'user')
         }
         setApiKey(apiKey)
         api.setApiKey(apiKey)
@@ -159,15 +172,23 @@ export function AuthProvider({ children }) {
 
   const logout = () => {
     localStorage.removeItem('api_key')
+    localStorage.removeItem('user_info')
     setApiKey(null)
     api.setApiKey(null)
     setIsAuthenticated(false)
+    setUserRole(null)
+  }
+
+  const isAdmin = () => {
+    return userRole === 'admin'
   }
 
   const value = {
     apiKey,
     isAuthenticated,
     loading,
+    userRole,
+    isAdmin: isAdmin(),
     login,
     loginWithUser,
     logout

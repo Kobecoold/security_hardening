@@ -104,6 +104,26 @@ class AuthManager:
                 key["revoked_at"] = key["revoked_at"].isoformat()
         return keys
     
+    def get_api_key_user(self, api_key: Optional[str]) -> Optional[Dict]:
+        """Lấy user info từ API key."""
+        if not api_key:
+            return None
+        
+        api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+        key_doc = self.api_keys_collection.find_one({"api_key_hash": api_key_hash, "is_active": True})
+        
+        if not key_doc:
+            return None
+        
+        # Check if API key name starts with "User: " to identify user-based keys
+        key_name = key_doc.get("name", "")
+        if key_name.startswith("User: "):
+            from users import user_manager
+            username = key_name.replace("User: ", "").strip()
+            return user_manager.get_user(username)
+        
+        return None
+    
     def has_any_active_keys(self) -> bool:
         """Kiểm tra xem có API key nào active không."""
         count = self.api_keys_collection.count_documents({"is_active": True})

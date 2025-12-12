@@ -12,11 +12,13 @@ import {
   Plus,
   Database
 } from 'lucide-react'
+import { useAuth } from '../contexts/AuthContext'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 import './Dashboard.css'
 
 export default function Dashboard() {
   const navigate = useNavigate()
+  const { isAdmin } = useAuth()
   const [stats, setStats] = useState({
     totalHosts: 0,
     complianceScore: 0,
@@ -113,10 +115,12 @@ export default function Dashboard() {
       <div className="dashboard-header">
         <h1>Dashboard</h1>
         <div className="header-actions">
-          <button onClick={() => navigate('/audit/new')} className="btn-quick-action">
-            <Plus size={18} />
-            New Audit
-          </button>
+          {isAdmin && (
+            <button onClick={() => navigate('/audit/new')} className="btn-quick-action">
+              <Plus size={18} />
+              New Audit
+            </button>
+          )}
           <button onClick={loadDashboardData} className="refresh-btn">
             Refresh
           </button>

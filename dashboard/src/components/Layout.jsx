@@ -7,20 +7,23 @@ import {
   FileCheck, 
   Wrench,
   LogOut,
-  Database
+  Database,
+  Users
 } from 'lucide-react'
+import { useAuth } from '../contexts/AuthContext'
 import './Layout.css'
 
 export default function Layout() {
   const location = useLocation()
-  const { logout } = useAuth()
+  const { logout, isAdmin } = useAuth()
 
   const navItems = [
     { path: '/', label: 'Dashboard', icon: LayoutDashboard },
     { path: '/hosts', label: 'Hosts', icon: Server },
     { path: '/audits', label: 'Audits', icon: FileCheck },
     { path: '/remediations', label: 'Remediations', icon: Wrench },
-    { path: '/backups', label: 'Backups', icon: Database }
+    { path: '/backups', label: 'Backups', icon: Database },
+    ...(isAdmin ? [{ path: '/users', label: 'Users', icon: Users }] : [])
   ]
 
   return (
