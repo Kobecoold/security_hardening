@@ -1,6 +1,26 @@
 import axios from 'axios'
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
+// Auto-detect API URL:
+// - If running in production (served from backend), use relative URL
+// - If running in dev (Vite dev server), use localhost:8080
+// - Can override with VITE_API_URL env variable
+const getApiBaseUrl = () => {
+  // Check if VITE_API_URL is set
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL
+  }
+  
+  // If running in production (served from backend), use relative URL
+  // This works when dashboard is served from the same origin as backend
+  if (import.meta.env.PROD) {
+    return '' // Relative URL - same origin as dashboard
+  }
+  
+  // Development mode - use localhost
+  return 'http://localhost:8080'
+}
+
+const API_BASE_URL = getApiBaseUrl()
 
 const api = axios.create({
   baseURL: API_BASE_URL,
