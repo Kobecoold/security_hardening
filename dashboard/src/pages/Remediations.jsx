@@ -13,8 +13,9 @@ export default function Remediations() {
   const [error, setError] = useState(null)
 
   useEffect(() => {
+    console.log('Remediations page - userRole:', userRole, 'isAdmin:', userRole === 'admin', 'type:', typeof userRole)
     loadRemediations()
-  }, [])
+  }, [userRole])
 
   const loadRemediations = async () => {
     try {
@@ -51,7 +52,7 @@ export default function Remediations() {
       <div className="page-header">
         <h1>Remediations</h1>
         <div className="header-actions">
-          {userRole === 'admin' && (
+          {userRole && userRole === 'admin' ? (
             <>
               <button onClick={() => navigate('/remediate/new')} className="btn-new-remediation">
                 <Plus size={18} />
@@ -62,7 +63,7 @@ export default function Remediations() {
                 Rollback
               </button>
             </>
-          )}
+          ) : null}
           <button onClick={loadRemediations} className="refresh-btn">
             <RefreshCw size={18} />
             Refresh
@@ -145,7 +146,7 @@ export default function Remediations() {
                   <span className={remediation.rollback_status === 'AVAILABLE' ? 'rollback-available' : 'rollback-unavailable'}>
                     {remediation.rollback_status}
                   </span>
-                  {remediation.rollback_status === 'AVAILABLE' && userRole === 'admin' && (
+                  {remediation.rollback_status === 'AVAILABLE' && userRole && userRole === 'admin' && (
                     <button
                       onClick={() => navigate('/rollback', {
                         state: {
