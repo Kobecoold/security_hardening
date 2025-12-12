@@ -17,6 +17,7 @@ from utils import load_rules, load_rules_by_os, load_remediation_script, load_wi
 from linux_audit import detect_os, ssh_connect, run_bash_check_stdin, truncate_output, get_linux_host_info
 from windows_audit import winrm_connect, run_winrm_audit, get_windows_host_info, detect_os_windows
 from auth import auth_manager, RequireAuth
+from users import user_manager
 
 # Đường dẫn đến dashboard
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
@@ -1048,7 +1049,80 @@ async def get_audit_detail(audit_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ==================== AUTHENTICATION ENDPOINTS ====================
+# ==================== USER AUTHENTICATION ENDPOINTS ====================
+
+@app.post("/auth/users/register")
+async def register_user(
+    username: str = Form(...),
+    password: str = Form(..., json_schema_extra={"format": "password"}),
+    email: str = Form(""),
+    role: str = Form("user"),
+):
+    """Đăng ký user mới (chỉ khi chưa có user nào)."""
+    try:
+        # Chỉ cho phép đăng ký user đầu tiên nếu chưa có user nào
+        if user_manager.has_any_users():
+            raise HTTPException(
+                status_code=403,
+                detail="Users already exist. Please contact administrator."
+            )
+        
+        user = user_manager.create_user(username, password, email, role)
+        return {
+            "status": "success",
+            "message": "User created successfully",
+            "user": user
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/auth/users/login")
+async def login_user(
+    username: str = Form(...),
+    password: str = Form(..., json_schema_extra={"format": "password"}),
+):
+    """Đăng nhập user và trả về API key tạm thời."""
+    try:
+        if not user_manager.verify_user(username, password):
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid username or password"
+            )
+        
+        # Tạo API key tạm thời cho user này (hoặc có thể dùng JWT token)
+        # Ở đây tạm thời tạo API key với tên user
+        api_key_data = auth_manager.generate_api_key(
+            name=f"User: {username}",
+            description=f"Temporary API key for {username}",
+            expires_days=30
+        )
+        
+        user_info = user_manager.get_user(username)
+        
+        return {
+            "status": "success",
+            "message": "Login successful",
+            "api_key": api_key_data["api_key"],
+            "user": user_info,
+            "expires_at": api_key_data["expires_at"]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/auth/users/me", dependencies=[RequireAuth])
+async def get_current_user():
+    """Lấy thông tin user hiện tại (cần API key)."""
+    # Note: Cần implement logic để map API key với user
+    # Tạm thời trả về thông tin cơ bản
+    return {
+        "message": "User info endpoint - to be implemented with API key to user mapping"
+    }
+
+# ==================== API KEY AUTHENTICATION ENDPOINTS ====================
 
 @app.post("/auth/setup")
 async def setup_first_api_key(

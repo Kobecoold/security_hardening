@@ -6,6 +6,9 @@ import Hosts from './pages/Hosts'
 import Audits from './pages/Audits'
 import Remediations from './pages/Remediations'
 import AuditDetail from './pages/AuditDetail'
+import AuditForm from './pages/AuditForm'
+import RemediationForm from './pages/RemediationForm'
+import Rollback from './pages/Rollback'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import Login from './pages/Login'
 import './App.css'
@@ -41,7 +44,11 @@ function AppRoutes() {
         <Route path="hosts" element={<Hosts />} />
         <Route path="audits" element={<Audits />} />
         <Route path="audits/:id" element={<AuditDetail />} />
+        <Route path="audit/new" element={<AuditForm osType="linux" />} />
+        <Route path="audit/new/windows" element={<AuditForm osType="windows" />} />
         <Route path="remediations" element={<Remediations />} />
+        <Route path="remediate/new" element={<RemediationForm />} />
+        <Route path="rollback" element={<Rollback />} />
       </Route>
     </Routes>
   )

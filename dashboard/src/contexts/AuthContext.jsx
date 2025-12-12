@@ -105,6 +105,58 @@ export function AuthProvider({ children }) {
     }
   }
 
+  const loginWithUser = async (username, password) => {
+    try {
+      if (!username || !password) {
+        return { success: false, error: 'Username and password are required' }
+      }
+
+      // Call backend login endpoint
+      const formData = new FormData()
+      formData.append('username', username)
+      formData.append('password', password)
+      
+      const response = await api.post('/auth/users/login', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      })
+      
+      if (response.data.api_key) {
+        // Store API key from login response
+        const apiKey = response.data.api_key
+        localStorage.setItem('api_key', apiKey)
+        if (response.data.user) {
+          localStorage.setItem('user_info', JSON.stringify(response.data.user))
+        }
+        setApiKey(apiKey)
+        api.setApiKey(apiKey)
+        
+        // Test connection with the new API key
+        const isAuthenticated = await testConnection(apiKey)
+        if (isAuthenticated) {
+          return { success: true }
+        } else {
+          localStorage.removeItem('api_key')
+          localStorage.removeItem('user_info')
+          setApiKey(null)
+          api.setApiKey(null)
+          return { success: false, error: 'Login successful but connection test failed' }
+        }
+      } else {
+        throw new Error('No API key received from server')
+      }
+    } catch (error) {
+      console.error('User login error:', error)
+      const errorMsg = error.response?.data?.detail || error.message || 'Failed to login'
+      localStorage.removeItem('api_key')
+      localStorage.removeItem('user_info')
+      setApiKey(null)
+      api.setApiKey(null)
+      return { success: false, error: errorMsg }
+    }
+  }
+
   const logout = () => {
     localStorage.removeItem('api_key')
     setApiKey(null)
@@ -117,6 +169,7 @@ export function AuthProvider({ children }) {
     isAuthenticated,
     loading,
     login,
+    loginWithUser,
     logout
   }
 

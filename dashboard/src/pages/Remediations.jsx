@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
-import { Wrench, RefreshCw, AlertCircle, CheckCircle, XCircle } from 'lucide-react'
+import { Wrench, RefreshCw, AlertCircle, CheckCircle, XCircle, Plus, RotateCcw } from 'lucide-react'
 import './Remediations.css'
 
 export default function Remediations() {
+  const navigate = useNavigate()
   const [remediations, setRemediations] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -46,10 +48,20 @@ export default function Remediations() {
     <div className="remediations-page">
       <div className="page-header">
         <h1>Remediations</h1>
-        <button onClick={loadRemediations} className="refresh-btn">
-          <RefreshCw size={18} />
-          Refresh
-        </button>
+        <div className="header-actions">
+          <button onClick={() => navigate('/remediate/new')} className="btn-new-remediation">
+            <Plus size={18} />
+            New Remediation
+          </button>
+          <button onClick={() => navigate('/rollback')} className="btn-rollback">
+            <RotateCcw size={18} />
+            Rollback
+          </button>
+          <button onClick={loadRemediations} className="refresh-btn">
+            <RefreshCw size={18} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -121,14 +133,28 @@ export default function Remediations() {
                     )}
                   </div>
                 )}
-                {remediation.rollback_status && (
-                  <div className="detail-item">
-                    <strong>Rollback:</strong>{' '}
-                    <span className={remediation.rollback_status === 'AVAILABLE' ? 'rollback-available' : 'rollback-unavailable'}>
-                      {remediation.rollback_status}
-                    </span>
-                  </div>
-                )}
+              {remediation.rollback_status && (
+                <div className="detail-item">
+                  <strong>Rollback:</strong>{' '}
+                  <span className={remediation.rollback_status === 'AVAILABLE' ? 'rollback-available' : 'rollback-unavailable'}>
+                    {remediation.rollback_status}
+                  </span>
+                  {remediation.rollback_status === 'AVAILABLE' && (
+                    <button
+                      onClick={() => navigate('/rollback', {
+                        state: {
+                          host: remediation.host,
+                          osType: remediation.os_type || remediation.os
+                        }
+                      })}
+                      className="btn-rollback-small"
+                    >
+                      <RotateCcw size={14} />
+                      Rollback
+                    </button>
+                  )}
+                </div>
+              )}
               </div>
 
               {remediation.output && (

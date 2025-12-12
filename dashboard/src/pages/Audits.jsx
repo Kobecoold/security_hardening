@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import api from '../services/api'
-import { FileCheck, RefreshCw, AlertCircle, Eye } from 'lucide-react'
+import { FileCheck, RefreshCw, AlertCircle, Eye, Plus } from 'lucide-react'
 import './Audits.css'
 
 export default function Audits() {
+  const navigate = useNavigate()
   const [audits, setAudits] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -48,10 +49,20 @@ export default function Audits() {
     <div className="audits-page">
       <div className="page-header">
         <h1>Audit Reports</h1>
-        <button onClick={loadAudits} className="refresh-btn">
-          <RefreshCw size={18} />
-          Refresh
-        </button>
+        <div className="header-actions">
+          <button onClick={() => navigate('/audit/new')} className="btn-new-audit">
+            <Plus size={18} />
+            New Linux Audit
+          </button>
+          <button onClick={() => navigate('/audit/new/windows')} className="btn-new-audit windows">
+            <Plus size={18} />
+            New Windows Audit
+          </button>
+          <button onClick={loadAudits} className="refresh-btn">
+            <RefreshCw size={18} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {error && (
