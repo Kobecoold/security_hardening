@@ -1,0 +1,15 @@
+id: cis-ubuntu-20.04-3.2.5
+os: ubuntu-20.04
+title: Ensure broadcast ICMP requests are ignored
+benchmark: CIS Ubuntu 20.04 LTS
+level: 1
+description: Ensure broadcast ICMP requests are ignored
+needs_sudo: false
+check:
+  bash: |
+    sysctl net.ipv4.icmp_echo_ignore_broadcasts | grep -q "net.ipv4.icmp_echo_ignore_broadcasts = 1"
+references:
+  - https://ubuntu.com/security/cis
+controls:
+  - CIS 3.2.5
+

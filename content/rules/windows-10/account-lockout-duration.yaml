@@ -1,0 +1,16 @@
+id: winrm-cis-windows10-1.2.2
+os: windows-10
+title: Configure Account Lockout Duration
+benchmark: CIS Windows 10
+level: 1
+description: Set account lockout duration to 15 minutes
+check:
+  winrm: net accounts | findstr "Lockout duration"
+  expected: "Lockout duration"
+remediation:
+  winrm: net accounts /lockoutduration:15
+references:
+  - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
+controls:
+  - CIS 1.2.2
+

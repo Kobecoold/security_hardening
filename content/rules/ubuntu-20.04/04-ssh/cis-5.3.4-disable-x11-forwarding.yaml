@@ -1,0 +1,15 @@
+id: cis-ubuntu-20.04-5.3.4
+os: ubuntu-20.04
+title: Disable SSH X11Forwarding
+benchmark: CIS Ubuntu 20.04 LTS
+level: 1
+description: Ensure X11Forwarding is disabled in /etc/ssh/sshd_config
+needs_sudo: false
+check:
+  bash: |
+    sshd -T 2>/dev/null | grep -i '^x11forwarding' | grep -qi 'no'
+references:
+  - https://ubuntu.com/security/cis
+controls:
+  - CIS 5.3.4
+

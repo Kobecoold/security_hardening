@@ -4,13 +4,12 @@ title: Disable SSH Root Login
 benchmark: CIS Ubuntu 20.04 LTS
 level: 1
 description: Ensure PermitRootLogin is set to no in /etc/ssh/sshd_config
+needs_sudo: false
 check:
   bash: |
-    grep -Eq '^PermitRootLogin no' /etc/ssh/sshd_config
-remediation:
-  bash: |
-    sed -i 's/^PermitRootLogin .*/PermitRootLogin no/' /etc/ssh/sshd_config
+    sshd -T 2>/dev/null | grep -i '^permitrootlogin' | grep -qi 'no'
 references:
   - https://ubuntu.com/security/cis
 controls:
   - CIS 5.2.4
+

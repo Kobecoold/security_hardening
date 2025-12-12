@@ -1,0 +1,15 @@
+id: cis-ubuntu-20.04-3.1.2
+os: ubuntu-20.04
+title: Disable send packet redirects
+benchmark: CIS Ubuntu 20.04 LTS
+level: 1
+description: Ensure send packet redirects are disabled
+needs_sudo: false
+check:
+  bash: |
+    sysctl net.ipv4.conf.all.send_redirects | grep -q "net.ipv4.conf.all.send_redirects = 0"
+references:
+  - https://ubuntu.com/security/cis
+controls:
+  - CIS 3.1.2
+

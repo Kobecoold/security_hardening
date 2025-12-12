@@ -1,0 +1,15 @@
+id: cis-ubuntu-20.04-1.1.10
+os: ubuntu-20.04
+title: Ensure noexec option set on /var/tmp partition
+benchmark: CIS Ubuntu 20.04 LTS
+level: 1
+description: Ensure noexec option is set on /var/tmp partition
+needs_sudo: false
+check:
+  bash: |
+    mount | grep -E '\s/var/tmp\s' | grep -q noexec
+references:
+  - https://ubuntu.com/security/cis
+controls:
+  - CIS 1.1.10
+

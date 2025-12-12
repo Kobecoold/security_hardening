@@ -31,3 +31,49 @@ content/rules/      # Nơi lưu các rule YAML/check script
 ## Tiếp theo
 - Thêm API nhận cấu hình asset, kiểm tra, chạy script Bash/PowerShell từ xa agentless.
 - Triển khai job queue và lưu log kết quả kiểm tra.
+
+
+## Set Up a Virtual Environment
+   ```
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
+## Install Dependencies
+   ```
+   pip install -r requirements.txt
+   ```
+## Run the Application
+   ```
+   uvicorn main:app --reload --host 0.0.0.0 --port 8080
+   ```
+## Test the Audit Engine
+   ```
+   curl -X POST "http://localhost:8080/audit/windows?host=192.168.206.151&username=Window&key_path=~/.ssh/id_ed25519"
+   ```
+## Kết quả
+   ```
+   {
+  "client_type": "windows",
+  "host": "192.168.206.151",
+  "benchmark": "CIS Windows 10 Level 1",
+  "total_rules": 2,
+  "results": [
+    {
+      "id": "cis-windows10-18.9.1",
+      "title": "Ensure 'OpenSSH Server' service is running",
+      "command": "sc query sshd",
+      "result": "...STATE : 4 RUNNING...",
+      "expected": "STATE              : 4  RUNNING",
+      "status": "PASS"
+    },
+    {
+      "id": "cis-windows10-2.3.11.1",
+      "title": "Ensure 'hosts' file exists and is not empty",
+      "command": "dir C:\\Windows\\System32\\drivers\\etc\\hosts",
+      "result": "...824 hosts...",
+      "expected": "hosts",
+      "status": "PASS"
+    }
+  ]
+}
+   ```

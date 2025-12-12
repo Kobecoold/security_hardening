@@ -1,0 +1,15 @@
+id: cis-ubuntu-20.04-3.1.1
+os: ubuntu-20.04
+title: Disable IP forwarding
+benchmark: CIS Ubuntu 20.04 LTS
+level: 1
+description: Ensure IP forwarding is disabled
+needs_sudo: false
+check:
+  bash: |
+    sysctl net.ipv4.ip_forward | grep -q "net.ipv4.ip_forward = 0"
+references:
+  - https://ubuntu.com/security/cis
+controls:
+  - CIS 3.1.1
+

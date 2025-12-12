@@ -1,0 +1,15 @@
+id: cis-ubuntu-20.04-4.1.3
+os: ubuntu-20.04
+title: Ensure auditing for processes that start prior to auditd is enabled
+benchmark: CIS Ubuntu 20.04 LTS
+level: 1
+description: Ensure auditing for processes that start prior to auditd is enabled
+needs_sudo: false
+check:
+  bash: |
+    grep -E "^\s*linux" /boot/grub/grub.cfg | grep -q "audit=1"
+references:
+  - https://ubuntu.com/security/cis
+controls:
+  - CIS 4.1.3
+

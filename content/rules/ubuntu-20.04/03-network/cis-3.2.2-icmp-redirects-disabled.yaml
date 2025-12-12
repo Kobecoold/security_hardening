@@ -1,0 +1,15 @@
+id: cis-ubuntu-20.04-3.2.2
+os: ubuntu-20.04
+title: Ensure ICMP redirects are not accepted
+benchmark: CIS Ubuntu 20.04 LTS
+level: 1
+description: Ensure ICMP redirects are not accepted
+needs_sudo: false
+check:
+  bash: |
+    sysctl net.ipv4.conf.all.accept_redirects | grep -q "net.ipv4.conf.all.accept_redirects = 0"
+references:
+  - https://ubuntu.com/security/cis
+controls:
+  - CIS 3.2.2
+
