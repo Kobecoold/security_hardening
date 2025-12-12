@@ -115,12 +115,6 @@ export default function Dashboard() {
       <div className="dashboard-header">
         <h1>Dashboard</h1>
         <div className="header-actions">
-          {userRole === 'admin' && (
-            <button onClick={() => navigate('/audit/new')} className="btn-quick-action">
-              <Plus size={18} />
-              New Audit
-            </button>
-          )}
           <button onClick={loadDashboardData} className="refresh-btn">
             Refresh
           </button>
