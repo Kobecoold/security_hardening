@@ -20,6 +20,7 @@ from auth import auth_manager, RequireAuth
 # Đường dẫn đến dashboard
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 DASHBOARD_DIR = os.path.join(REPO_ROOT, "dashboard")
+DASHBOARD_DIST = os.path.join(DASHBOARD_DIR, "dist")
 
 app = FastAPI(
     title="Security Hardening Audit Engine",
@@ -29,23 +30,37 @@ app = FastAPI(
     },
 )
 
-# Serve dashboard static files
-if os.path.exists(DASHBOARD_DIR):
-    app.mount("/dashboard", StaticFiles(directory=DASHBOARD_DIR, html=True), name="dashboard")
-    
-    @app.get("/")
-    async def root_redirect():
-        """Redirect root to dashboard."""
-        return FileResponse(os.path.join(DASHBOARD_DIR, "index.html"))
+# Serve React dashboard (production build) - Priority 1
+# Note: Dashboard routes will be registered at the END of file to avoid conflicts with API routes
+DASHBOARD_BUILT = os.path.exists(DASHBOARD_DIST)
+if DASHBOARD_BUILT:
+    # Serve static assets (JS, CSS, images) - must be before catch-all route
+    assets_dir = os.path.join(DASHBOARD_DIST, "assets")
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="dashboard-assets")
 
-@app.get("/")
-async def root():
-    """Root endpoint - API information and quick links."""
+# Fallback: Serve old HTML dashboard if React build doesn't exist
+elif os.path.exists(os.path.join(DASHBOARD_DIR, "index.html")):
+    app.mount("/dashboard", StaticFiles(directory=DASHBOARD_DIR, html=True), name="dashboard-old")
+
+# API Info endpoint (accessible even when dashboard is served at root)
+@app.get("/api/info")
+async def root_api_info():
+    """API information and quick links."""
     has_keys = auth_manager.has_any_active_keys()
+    
+    # Determine dashboard URL
+    dashboard_url = None
+    if os.path.exists(DASHBOARD_DIST):
+        dashboard_url = "/"
+    elif os.path.exists(os.path.join(DASHBOARD_DIR, "index.html")):
+        dashboard_url = "/dashboard"
+    
     return {
         "name": "Security Hardening Agentless API",
         "version": "1.0.0",
         "description": "API for agentless security hardening audit and remediation",
+        "dashboard": dashboard_url,
         "authentication": {
             "required": True,
             "method": "API Key (X-API-Key header)",
@@ -81,6 +96,13 @@ async def root():
             }
         }
     }
+
+# Fallback: Root endpoint returns API info when dashboard not built
+if not os.path.exists(DASHBOARD_DIST):
+    @app.get("/")
+    async def root():
+        """Root endpoint - API information (fallback when dashboard not built)."""
+        return await root_api_info()
 
 @app.post("/audit/windows", dependencies=[RequireAuth])
 async def audit_windows_winrm(
@@ -1142,3 +1164,85 @@ async def reset_all_api_keys(
 async def version():
     """Version endpoint."""
     return {"name": "security_hardening", "api": "v1"}
+
+# ==================== DASHBOARD ROUTES (Must be last to avoid conflicts) ====================
+
+# Serve React dashboard at root (only if built)
+# This must be registered AFTER all API routes
+if DASHBOARD_BUILT:
+    @app.get("/")
+    async def serve_dashboard_root():
+        """Serve React dashboard at root."""
+        index_path = os.path.join(DASHBOARD_DIST, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        # Fallback to API info if index.html not found
+        return await root_api_info()
+    
+    # Serve dashboard at /dashboard as well for backward compatibility
+    @app.get("/dashboard")
+    @app.get("/dashboard/{path:path}")
+    async def serve_dashboard_route(path: str = ""):
+        """Serve React dashboard at /dashboard route (for SPA routing)."""
+        index_path = os.path.join(DASHBOARD_DIST, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        return await root_api_info()
+    
+    # Catch-all for React Router (must be last route)
+    # This handles all non-API routes like /hosts, /audits, etc.
+    @app.get("/{path:path}")
+    async def serve_dashboard_spa(path: str):
+        """Catch-all route for React SPA routing (handles /hosts, /audits, etc.)."""
+        # Skip if it's an API route or static file
+        if path.startswith(("api/", "docs", "redoc", "openapi.json", "healthz", "version", 
+                           "audit/", "remediate/", "rollback/", "reports/", "auth/", 
+                           "backups/", "rules", "test/", "assets/")):
+            raise HTTPException(status_code=404, detail="Not found")
+        
+        # Serve React dashboard for all other routes
+        index_path = os.path.join(DASHBOARD_DIST, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        raise HTTPException(status_code=404, detail="Dashboard not found")
+
+# ==================== DASHBOARD ROUTES (Must be last to avoid conflicts) ====================
+
+# Serve React dashboard at root (only if built)
+# This must be registered AFTER all API routes
+if DASHBOARD_BUILT:
+    @app.get("/")
+    async def serve_dashboard_root():
+        """Serve React dashboard at root."""
+        index_path = os.path.join(DASHBOARD_DIST, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        # Fallback to API info if index.html not found
+        return await root_api_info()
+    
+    # Serve dashboard at /dashboard as well for backward compatibility
+    @app.get("/dashboard")
+    @app.get("/dashboard/{path:path}")
+    async def serve_dashboard_route(path: str = ""):
+        """Serve React dashboard at /dashboard route (for SPA routing)."""
+        index_path = os.path.join(DASHBOARD_DIST, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        return await root_api_info()
+    
+    # Catch-all for React Router (must be last route)
+    # This handles all non-API routes like /hosts, /audits, etc.
+    @app.get("/{path:path}")
+    async def serve_dashboard_spa(path: str):
+        """Catch-all route for React SPA routing (handles /hosts, /audits, etc.)."""
+        # Skip if it's an API route or static file
+        if path.startswith(("api/", "docs", "redoc", "openapi.json", "healthz", "version", 
+                           "audit/", "remediate/", "rollback/", "reports/", "auth/", 
+                           "backups/", "rules", "test/", "assets/")):
+            raise HTTPException(status_code=404, detail="Not found")
+        
+        # Serve React dashboard for all other routes
+        index_path = os.path.join(DASHBOARD_DIST, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        raise HTTPException(status_code=404, detail="Dashboard not found")
