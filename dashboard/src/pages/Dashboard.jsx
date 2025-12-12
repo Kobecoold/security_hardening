@@ -9,7 +9,8 @@ import {
   Wrench,
   TrendingUp,
   AlertCircle,
-  Plus
+  Plus,
+  Database
 } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 import './Dashboard.css'
@@ -49,11 +50,22 @@ export default function Dashboard() {
       const audits = auditsRes.data.audits || []
       const remediations = remediationsRes.data.remediations || []
 
+      // Load backups count
+      let backupsCount = 0
+      try {
+        const linuxBackups = await api.get('/backups/linux')
+        const windowsBackups = await api.get('/backups/windows')
+        backupsCount = (linuxBackups.data.total || 0) + (windowsBackups.data.total || 0)
+      } catch (err) {
+        console.error('Error loading backups count:', err)
+      }
+
       setStats({
         totalHosts: hosts.length,
         complianceScore: complianceStats.overall_avg_compliance || 0,
         totalAudits: auditsRes.data.total || 0,
-        totalRemediations: remediationsRes.data.total || 0
+        totalRemediations: remediationsRes.data.total || 0,
+        totalBackups: backupsCount
       })
 
       // Prepare compliance chart data
@@ -146,6 +158,13 @@ export default function Dashboard() {
           label="Remediation actions"
           icon={Wrench}
           color="#ec4899"
+        />
+        <StatCard
+          title="Backups"
+          value={stats.totalBackups}
+          label="System backups"
+          icon={Database}
+          color="#06b6d4"
         />
       </div>
 

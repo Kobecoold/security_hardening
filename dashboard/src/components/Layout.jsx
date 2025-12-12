@@ -6,7 +6,8 @@ import {
   Server, 
   FileCheck, 
   Wrench,
-  LogOut 
+  LogOut,
+  Database
 } from 'lucide-react'
 import './Layout.css'
 
@@ -18,7 +19,8 @@ export default function Layout() {
     { path: '/', label: 'Dashboard', icon: LayoutDashboard },
     { path: '/hosts', label: 'Hosts', icon: Server },
     { path: '/audits', label: 'Audits', icon: FileCheck },
-    { path: '/remediations', label: 'Remediations', icon: Wrench }
+    { path: '/remediations', label: 'Remediations', icon: Wrench },
+    { path: '/backups', label: 'Backups', icon: Database }
   ]
 
   return (
