@@ -37,10 +37,25 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    // Log error for debugging
+    if (error.response) {
+      console.error('API Error:', {
+        status: error.response.status,
+        statusText: error.response.statusText,
+        data: error.response.data,
+        url: error.config?.url
+      })
+    } else if (error.request) {
+      console.error('Network Error:', 'No response received', error.request)
+    } else {
+      console.error('Error:', error.message)
+    }
+
     if (error.response?.status === 401) {
       // Unauthorized - clear API key
       localStorage.removeItem('api_key')
       currentApiKey = null
+      delete api.defaults.headers.common['X-API-Key']
     }
     return Promise.reject(error)
   }

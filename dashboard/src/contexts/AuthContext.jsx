@@ -31,36 +31,77 @@ export function AuthProvider({ children }) {
 
   const testConnection = async (key) => {
     try {
-      const response = await api.get('/healthz')
-      if (response.status === 200) {
-        // Test with authenticated endpoint
-        try {
-          await api.get('/reports/compliance-stats')
+      // First test backend is reachable
+      const healthResponse = await api.get('/healthz')
+      if (healthResponse.status !== 200) {
+        setIsAuthenticated(false)
+        setLoading(false)
+        return false
+      }
+
+      // Then test with authenticated endpoint
+      try {
+        const statsResponse = await api.get('/reports/compliance-stats')
+        if (statsResponse.status === 200) {
           setIsAuthenticated(true)
-        } catch (error) {
-          if (error.response?.status === 401) {
-            setIsAuthenticated(false)
-          } else {
-            setIsAuthenticated(true) // Assume connected if health check passes
-          }
+          setLoading(false)
+          return true
+        } else {
+          setIsAuthenticated(false)
+          setLoading(false)
+          return false
+        }
+      } catch (error) {
+        console.error('Authentication test failed:', error)
+        if (error.response?.status === 401) {
+          setIsAuthenticated(false)
+          setLoading(false)
+          return false
+        } else {
+          // Network error or other issue
+          console.error('Unexpected error:', error.response?.data || error.message)
+          setIsAuthenticated(false)
+          setLoading(false)
+          return false
         }
       }
     } catch (error) {
+      console.error('Connection test failed:', error)
       setIsAuthenticated(false)
-    } finally {
       setLoading(false)
+      return false
     }
   }
 
   const login = async (key) => {
     try {
-      localStorage.setItem('api_key', key)
-      setApiKey(key)
-      api.setApiKey(key)
-      await testConnection(key)
-      return { success: true }
+      if (!key || key.trim() === '') {
+        return { success: false, error: 'API key cannot be empty' }
+      }
+
+      // Set API key first
+      localStorage.setItem('api_key', key.trim())
+      setApiKey(key.trim())
+      api.setApiKey(key.trim())
+
+      // Test connection
+      const isAuthenticated = await testConnection(key.trim())
+      
+      if (isAuthenticated) {
+        return { success: true }
+      } else {
+        // Clear invalid key
+        localStorage.removeItem('api_key')
+        setApiKey(null)
+        api.setApiKey(null)
+        return { success: false, error: 'Invalid API key or connection failed' }
+      }
     } catch (error) {
-      return { success: false, error: error.message }
+      console.error('Login error:', error)
+      localStorage.removeItem('api_key')
+      setApiKey(null)
+      api.setApiKey(null)
+      return { success: false, error: error.message || 'Failed to connect' }
     }
   }
 

@@ -21,10 +21,12 @@ export default function Login() {
       if (result.success) {
         navigate('/')
       } else {
-        setError(result.error || 'Invalid API key')
+        setError(result.error || 'Invalid API key. Please check your API key and ensure backend is running.')
+        console.error('Login failed:', result.error)
       }
     } catch (err) {
-      setError('Failed to connect. Please check your API key and backend connection.')
+      console.error('Login exception:', err)
+      setError(err.message || 'Failed to connect. Please check your API key and backend connection.')
     } finally {
       setLoading(false)
     }

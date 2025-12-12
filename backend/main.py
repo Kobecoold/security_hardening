@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Optional
 from database import db
 from rollback import rollback_manager
@@ -28,6 +29,15 @@ app = FastAPI(
         "displayRequestDuration": True,
         "tryItOutEnabled": True,
     },
+)
+
+# CORS middleware - Allow dashboard to make API calls
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, specify exact origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Serve React dashboard (production build) - Priority 1
