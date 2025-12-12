@@ -14,7 +14,7 @@ import './Layout.css'
 
 export default function Layout() {
   const location = useLocation()
-  const { logout, isAdmin } = useAuth()
+  const { logout, userRole } = useAuth()
 
   const navItems = [
     { path: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -22,7 +22,7 @@ export default function Layout() {
     { path: '/audits', label: 'Audits', icon: FileCheck },
     { path: '/remediations', label: 'Remediations', icon: Wrench },
     { path: '/backups', label: 'Backups', icon: Database },
-    ...(isAdmin ? [{ path: '/users', label: 'Users', icon: Users }] : [])
+    ...(userRole === 'admin' ? [{ path: '/users', label: 'Users', icon: Users }] : [])
   ]
 
   return (

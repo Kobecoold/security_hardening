@@ -57,6 +57,19 @@ export function AuthProvider({ children }) {
         if (statsResponse.status === 200) {
           setIsAuthenticated(true)
           setLoading(false)
+          
+          // Try to get user info if available (for API key login)
+          try {
+            const userInfo = localStorage.getItem('user_info')
+            if (userInfo) {
+              const parsed = JSON.parse(userInfo)
+              setUserRole(parsed.role || 'user')
+              console.log('Loaded user role from localStorage:', parsed.role)
+            }
+          } catch (e) {
+            // Ignore error
+          }
+          
           return true
         } else {
           setIsAuthenticated(false)
@@ -181,7 +194,7 @@ export function AuthProvider({ children }) {
     setUserRole(null)
   }
 
-  const isAdmin = userRole === 'admin' || false
+  const isAdmin = userRole === 'admin'
 
   const value = {
     apiKey,

@@ -94,7 +94,7 @@ export default function RemediationForm() {
 
   const handleSelectAll = () => {
     const filtered = getFilteredRules()
-    const allIds = filtered.map(r => r.id).filter(Boolean)
+    const allIds = filtered.map(r => r.id).filter(id => id && id.trim() !== '')
     setFormData(prev => ({ ...prev, rule_ids: allIds }))
   }
 
@@ -130,23 +130,61 @@ export default function RemediationForm() {
     setLoading(true)
 
     try {
-      if (formData.os_type === 'linux' || formData.os_type.startsWith('ubuntu') || formData.os_type.startsWith('debian')) {
-        // Linux remediation
-        const formDataToSend = new FormData()
-        formDataToSend.append('Host', formData.host)
-        formDataToSend.append('Username', formData.username)
-        if (formData.key_path) formDataToSend.append('Key_path', formData.key_path)
-        if (formData.password) formDataToSend.append('Password', formData.password)
-        formDataToSend.append('Use_sudo', formData.use_sudo)
-        if (formData.sudo_password) formDataToSend.append('Sudo_password', formData.sudo_password)
-        formDataToSend.append('Rule_id', formData.rule_id)
-        formDataToSend.append('create_backup', formData.create_backup)
+      if (formData.rule_ids.length === 0) {
+        setError('Please select at least one rule to fix')
+        setLoading(false)
+        return
+      }
 
-        const response = await api.post('/remediate/linux', formDataToSend, {
-          headers: {
-            'Content-Type': 'multipart/form-data'
+      if (formData.os_type === 'linux' || formData.os_type.startsWith('ubuntu') || formData.os_type.startsWith('debian')) {
+        // Linux remediation - run for each selected rule
+        const validRuleIds = formData.rule_ids.filter(id => id && id.trim() !== '')
+        
+        if (validRuleIds.length === 0) {
+          setError('Please select at least one valid rule to fix')
+          setLoading(false)
+          return
+        }
+
+        const results = []
+        for (let i = 0; i < validRuleIds.length; i++) {
+          const ruleId = validRuleIds[i]
+          
+          if (!ruleId || ruleId.trim() === '') {
+            console.warn('Skipping invalid rule ID:', ruleId)
+            continue
           }
-        })
+          
+          console.log(`Processing rule ${i + 1}/${validRuleIds.length}: ${ruleId}`)
+          
+          const formDataToSend = new FormData()
+          formDataToSend.append('Host', formData.host)
+          formDataToSend.append('Username', formData.username)
+          if (formData.key_path) formDataToSend.append('Key_path', formData.key_path)
+          if (formData.password) formDataToSend.append('Password', formData.password)
+          formDataToSend.append('Use_sudo', formData.use_sudo)
+          if (formData.sudo_password) formDataToSend.append('Sudo_password', formData.sudo_password)
+          formDataToSend.append('Rule_id', ruleId.trim())
+          // Only create backup for first rule
+          formDataToSend.append('create_backup', formData.create_backup && i === 0)
+
+          try {
+            const response = await api.post('/remediate/linux', formDataToSend, {
+              headers: {
+                'Content-Type': 'multipart/form-data'
+              }
+            })
+            results.push(response.data)
+          } catch (err) {
+            console.error(`Error remediating rule ${ruleId}:`, err)
+            // Continue with next rule instead of stopping
+            results.push({
+              rule_id: ruleId,
+              status: 'FAILED',
+              error: err.response?.data?.detail || err.message
+            })
+          }
+        }
 
         setSuccess(true)
         setTimeout(() => {
@@ -277,30 +315,32 @@ export default function RemediationForm() {
                           <span>No rules found. {formData.os_type ? `Try changing OS type or check if rules exist for ${formData.os_type}` : 'Please select OS type first'}</span>
                         </div>
                       ) : (
-                        getFilteredRules().map((rule) => {
-                          const isSelected = formData.rule_ids.includes(rule.id)
-                          return (
-                            <div key={rule.id} className={`rule-item ${isSelected ? 'selected' : ''}`}>
-                              <label className="rule-checkbox">
-                                <input
-                                  type="checkbox"
-                                  checked={isSelected}
-                                  onChange={() => handleRuleToggle(rule.id)}
-                                />
-                                <div className="rule-info">
-                                  <div className="rule-id">{rule.id}</div>
-                                  <div className="rule-title">{rule.title || 'No title'}</div>
-                                  {rule.description && (
-                                    <div className="rule-description">{rule.description}</div>
-                                  )}
-                                  {rule.level && (
-                                    <span className="rule-level">Level: {rule.level}</span>
-                                  )}
-                                </div>
-                              </label>
-                            </div>
-                          )
-                        })
+                        getFilteredRules()
+                          .filter(rule => rule.id && rule.id.trim() !== '') // Only show rules with valid IDs
+                          .map((rule) => {
+                            const isSelected = formData.rule_ids.includes(rule.id)
+                            return (
+                              <div key={rule.id} className={`rule-item ${isSelected ? 'selected' : ''}`}>
+                                <label className="rule-checkbox">
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => handleRuleToggle(rule.id)}
+                                  />
+                                  <div className="rule-info">
+                                    <div className="rule-id">{rule.id}</div>
+                                    <div className="rule-title">{rule.title || 'No title'}</div>
+                                    {rule.description && (
+                                      <div className="rule-description">{rule.description}</div>
+                                    )}
+                                    {rule.level && (
+                                      <span className="rule-level">Level: {rule.level}</span>
+                                    )}
+                                  </div>
+                                </label>
+                              </div>
+                            )
+                          })
                       )}
                     </div>
                   </>

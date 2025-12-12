@@ -19,11 +19,6 @@ import './Dashboard.css'
 export default function Dashboard() {
   const navigate = useNavigate()
   const { isAdmin, userRole } = useAuth()
-  
-  // Debug admin status
-  useEffect(() => {
-    console.log('Dashboard - isAdmin:', isAdmin, 'userRole:', userRole)
-  }, [isAdmin, userRole])
   const [stats, setStats] = useState({
     totalHosts: 0,
     complianceScore: 0,
@@ -120,7 +115,7 @@ export default function Dashboard() {
       <div className="dashboard-header">
         <h1>Dashboard</h1>
         <div className="header-actions">
-          {isAdmin && (
+          {userRole === 'admin' && (
             <button onClick={() => navigate('/audit/new')} className="btn-quick-action">
               <Plus size={18} />
               New Audit
