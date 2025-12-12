@@ -10,7 +10,6 @@ import {
   Database,
   Users
 } from 'lucide-react'
-import { useAuth } from '../contexts/AuthContext'
 import './Layout.css'
 
 export default function Layout() {
