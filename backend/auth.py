@@ -2,7 +2,7 @@
 import secrets
 import hashlib
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Dict
 from fastapi import HTTPException, Security, Depends
 from fastapi.security import APIKeyHeader
 from database import db
