@@ -179,16 +179,14 @@ export function AuthProvider({ children }) {
     setUserRole(null)
   }
 
-  const isAdmin = () => {
-    return userRole === 'admin'
-  }
+  const isAdmin = userRole === 'admin'
 
   const value = {
     apiKey,
     isAuthenticated,
     loading,
     userRole,
-    isAdmin: isAdmin(),
+    isAdmin,
     login,
     loginWithUser,
     logout

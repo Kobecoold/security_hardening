@@ -34,10 +34,14 @@ export default function RemediationForm() {
   useEffect(() => {
     if (auditId) {
       loadFailedRulesFromAudit(auditId)
-    } else if (formData.os_type) {
+    }
+  }, [auditId])
+
+  useEffect(() => {
+    if (formData.os_type && !auditId) {
       loadAvailableRules()
     }
-  }, [auditId, formData.os_type])
+  }, [formData.os_type])
 
   const loadFailedRulesFromAudit = async (auditId) => {
     try {
