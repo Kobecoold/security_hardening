@@ -533,7 +533,7 @@ async def test_linux_connection(
         raise HTTPException(status_code=500, detail=f"Connection test failed: {str(e)}")
 
 # SỬA ENDPOINT REMEDIATION ĐỂ TỰ ĐỘNG TẠO BACKUP
-@app.post("/remediate/windows", dependencies=[RequireAuth])
+@app.post("/remediate/windows", dependencies=[RequireAdmin])
 async def remediate_windows(
     host: str = Form(...),
     username: str = Form("Window"),
@@ -648,7 +648,7 @@ async def remediate_windows(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=error_msg)
 
-@app.post("/rollback/windows", dependencies=[RequireAuth])
+@app.post("/rollback/windows", dependencies=[RequireAdmin])
 async def rollback_windows(
     host: str = Form(...),
     username: str = Form("Window"),  # SỬA: "Administrator" → "Window"
@@ -694,7 +694,7 @@ async def get_windows_backups(host: Optional[str] = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/rollback/linux", dependencies=[RequireAuth])
+@app.post("/rollback/linux", dependencies=[RequireAdmin])
 async def rollback_linux(
     Host: str = Form(...),
     Username: str = Form(""),
@@ -739,7 +739,7 @@ async def get_linux_backups(host: Optional[str] = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/remediate/linux", dependencies=[RequireAuth])
+@app.post("/remediate/linux", dependencies=[RequireAdmin])
 async def remediate_linux(
     Host: str = Form(...),
     Username: str = Form(""),

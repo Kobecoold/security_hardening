@@ -1,11 +1,19 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
+import { useAuth } from '../contexts/AuthContext'
 import { RotateCcw, Loader, AlertCircle, CheckCircle, Clock, Server } from 'lucide-react'
 import './Rollback.css'
 
 export default function Rollback() {
   const navigate = useNavigate()
+  const { userRole } = useAuth()
+  
+  useEffect(() => {
+    if (userRole !== 'admin') {
+      navigate('/remediations')
+    }
+  }, [userRole, navigate])
   const [host, setHost] = useState('')
   const [osType, setOsType] = useState('linux')
   const [loading, setLoading] = useState(false)

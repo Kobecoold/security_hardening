@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
+import { useAuth } from '../contexts/AuthContext'
 import { Wrench, RefreshCw, AlertCircle, CheckCircle, XCircle, Plus, RotateCcw } from 'lucide-react'
 import './Remediations.css'
 
 export default function Remediations() {
   const navigate = useNavigate()
+  const { userRole } = useAuth()
   const [remediations, setRemediations] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -49,14 +51,18 @@ export default function Remediations() {
       <div className="page-header">
         <h1>Remediations</h1>
         <div className="header-actions">
-          <button onClick={() => navigate('/remediate/new')} className="btn-new-remediation">
-            <Plus size={18} />
-            New Remediation
-          </button>
-          <button onClick={() => navigate('/rollback')} className="btn-rollback">
-            <RotateCcw size={18} />
-            Rollback
-          </button>
+          {userRole === 'admin' && (
+            <>
+              <button onClick={() => navigate('/remediate/new')} className="btn-new-remediation">
+                <Plus size={18} />
+                New Remediation
+              </button>
+              <button onClick={() => navigate('/rollback')} className="btn-rollback">
+                <RotateCcw size={18} />
+                Rollback
+              </button>
+            </>
+          )}
           <button onClick={loadRemediations} className="refresh-btn">
             <RefreshCw size={18} />
             Refresh
@@ -139,7 +145,7 @@ export default function Remediations() {
                   <span className={remediation.rollback_status === 'AVAILABLE' ? 'rollback-available' : 'rollback-unavailable'}>
                     {remediation.rollback_status}
                   </span>
-                  {remediation.rollback_status === 'AVAILABLE' && (
+                  {remediation.rollback_status === 'AVAILABLE' && userRole === 'admin' && (
                     <button
                       onClick={() => navigate('/rollback', {
                         state: {

@@ -1,12 +1,20 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import api from '../services/api'
+import { useAuth } from '../contexts/AuthContext'
 import { Wrench, Loader, AlertCircle, CheckCircle, Server } from 'lucide-react'
 import './RemediationForm.css'
 
 export default function RemediationForm() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { userRole } = useAuth()
+  
+  useEffect(() => {
+    if (userRole !== 'admin') {
+      navigate('/remediations')
+    }
+  }, [userRole, navigate])
   const [loading, setLoading] = useState(false)
   const [loadingRules, setLoadingRules] = useState(false)
   const [error, setError] = useState('')

@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
+import { useAuth } from '../contexts/AuthContext'
 import { Database, RefreshCw, Filter, RotateCcw, Server, Calendar, Eye } from 'lucide-react'
 import './Backups.css'
 
 export default function Backups() {
   const navigate = useNavigate()
+  const { userRole } = useAuth()
   const [backups, setBackups] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -247,13 +249,15 @@ export default function Backups() {
                     <Eye size={14} />
                     View Details
                   </button>
-                  <button
-                    onClick={() => handleRollback(backup)}
-                    className="btn-rollback"
-                  >
-                    <RotateCcw size={14} />
-                    Rollback
-                  </button>
+                  {userRole === 'admin' && (
+                    <button
+                      onClick={() => handleRollback(backup)}
+                      className="btn-rollback"
+                    >
+                      <RotateCcw size={14} />
+                      Rollback
+                    </button>
+                  )}
                 </div>
               </div>
             )

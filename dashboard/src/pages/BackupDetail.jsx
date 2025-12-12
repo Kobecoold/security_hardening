@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../services/api'
+import { useAuth } from '../contexts/AuthContext'
 import { ArrowLeft, Database, Calendar, Server, RotateCcw, AlertCircle } from 'lucide-react'
 import './BackupDetail.css'
 
 export default function BackupDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { userRole } = useAuth()
   const [backup, setBackup] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -140,10 +142,12 @@ export default function BackupDetail() {
           </button>
           <h1>Backup Details</h1>
         </div>
-        <button onClick={handleRollback} className="btn-rollback-large">
-          <RotateCcw size={18} />
-          Rollback to this Backup
-        </button>
+        {userRole === 'admin' && (
+          <button onClick={handleRollback} className="btn-rollback-large">
+            <RotateCcw size={18} />
+            Rollback to this Backup
+          </button>
+        )}
       </div>
 
       <div className="backup-detail-container">
