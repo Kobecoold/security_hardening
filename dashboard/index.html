@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security Hardening Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: white;
+            padding: 20px 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .header h1 {
+            color: #333;
+            font-size: 24px;
+        }
+        
+        .api-key-section {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .api-key-input {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .api-key-input input {
+            flex: 1;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        
+        .api-key-input button {
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
+        .api-key-input button:hover {
+            background: #5568d3;
+        }
+        
+        .status {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 5px;
+            display: none;
+        }
+        
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .card h2 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        
+        .stat {
+            font-size: 32px;
+            font-weight: bold;
+            color: #667eea;
+            margin: 10px 0;
+        }
+        
+        .stat-label {
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #5568d3;
+        }
+        
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+        
+        .table-container {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            overflow-x: auto;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        th {
+            background: #f8f9fa;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        tr:hover {
+            background: #f8f9fa;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .badge-success {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .badge-danger {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .badge-warning {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔒 Security Hardening Dashboard</h1>
+            <div id="connection-status" class="badge badge-warning">Not Connected</div>
+        </div>
+        
+        <div class="api-key-section">
+            <h2>API Key Configuration</h2>
+            <p style="color: #666; margin-bottom: 10px;">Nhập API key để kết nối với backend. API key được lưu trong localStorage.</p>
+            <div class="api-key-input">
+                <input type="password" id="api-key-input" placeholder="Enter your API key (sk_...)" />
+                <button onclick="saveApiKey()">Save & Connect</button>
+            </div>
+            <div id="api-key-status" class="status"></div>
+            <div style="margin-top: 10px;">
+                <button class="btn btn-secondary" onclick="clearApiKey()">Clear API Key</button>
+                <button class="btn btn-secondary" onclick="testConnection()">Test Connection</button>
+            </div>
+        </div>
+        
+        <div class="dashboard-grid">
+            <div class="card">
+                <h2>Total Hosts</h2>
+                <div class="stat" id="total-hosts">-</div>
+                <div class="stat-label">Monitored systems</div>
+            </div>
+            
+            <div class="card">
+                <h2>Compliance Score</h2>
+                <div class="stat" id="compliance-score">-</div>
+                <div class="stat-label">Average across all hosts</div>
+            </div>
+            
+            <div class="card">
+                <h2>Total Audits</h2>
+                <div class="stat" id="total-audits">-</div>
+                <div class="stat-label">Audit reports</div>
+            </div>
+            
+            <div class="card">
+                <h2>Remediations</h2>
+                <div class="stat" id="total-remediations">-</div>
+                <div class="stat-label">Remediation actions</div>
+            </div>
+        </div>
+        
+        <div class="button-group" style="margin-bottom: 20px;">
+            <button class="btn btn-primary" onclick="loadStats()">Refresh Stats</button>
+            <button class="btn btn-primary" onclick="loadHosts()">View Hosts</button>
+            <button class="btn btn-primary" onclick="loadAudits()">View Audits</button>
+        </div>
+        
+        <div class="table-container">
+            <h2 style="margin-bottom: 15px;">Recent Audit Reports</h2>
+            <div id="audits-table">
+                <div class="loading">Click "View Audits" to load data...</div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const API_BASE = window.location.origin.replace(':3000', ':8080') || 'http://localhost:8080';
+        
+        // Load API key from localStorage on page load
+        window.onload = function() {
+            const savedKey = localStorage.getItem('api_key');
+            if (savedKey) {
+                document.getElementById('api-key-input').value = savedKey;
+                testConnection();
+            }
+        };
+        
+        function saveApiKey() {
+            const apiKey = document.getElementById('api-key-input').value.trim();
+            if (!apiKey) {
+                showStatus('error', 'Please enter an API key');
+                return;
+            }
+            
+            localStorage.setItem('api_key', apiKey);
+            showStatus('success', 'API key saved! Testing connection...');
+            testConnection();
+        }
+        
+        function clearApiKey() {
+            localStorage.removeItem('api_key');
+            document.getElementById('api-key-input').value = '';
+            document.getElementById('connection-status').textContent = 'Not Connected';
+            document.getElementById('connection-status').className = 'badge badge-warning';
+            showStatus('success', 'API key cleared');
+        }
+        
+        function getApiKey() {
+            return localStorage.getItem('api_key');
+        }
+        
+        function getHeaders() {
+            const apiKey = getApiKey();
+            if (!apiKey) {
+                throw new Error('No API key found. Please save your API key first.');
+            }
+            return {
+                'X-API-Key': apiKey,
+                'Content-Type': 'application/json'
+            };
+        }
+        
+        async function testConnection() {
+            const apiKey = getApiKey();
+            if (!apiKey) {
+                showStatus('error', 'No API key found');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/healthz`);
+                if (response.ok) {
+                    // Test with API key
+                    const testResponse = await fetch(`${API_BASE}/reports/compliance-stats`, {
+                        headers: getHeaders()
+                    });
+                    
+                    if (testResponse.ok) {
+                        document.getElementById('connection-status').textContent = 'Connected';
+                        document.getElementById('connection-status').className = 'badge badge-success';
+                        showStatus('success', '✅ Connected successfully!');
+                        loadStats();
+                    } else if (testResponse.status === 401) {
+                        document.getElementById('connection-status').textContent = 'Invalid API Key';
+                        document.getElementById('connection-status').className = 'badge badge-danger';
+                        showStatus('error', '❌ Invalid API key. Please check your key.');
+                    } else {
+                        throw new Error(`HTTP ${testResponse.status}`);
+                    }
+                } else {
+                    throw new Error('Backend not available');
+                }
+            } catch (error) {
+                document.getElementById('connection-status').textContent = 'Connection Failed';
+                document.getElementById('connection-status').className = 'badge badge-danger';
+                showStatus('error', `❌ Connection failed: ${error.message}`);
+            }
+        }
+        
+        async function loadStats() {
+            try {
+                const [hostsRes, statsRes, auditsRes, remediationsRes] = await Promise.all([
+                    fetch(`${API_BASE}/reports/hosts`, { headers: getHeaders() }),
+                    fetch(`${API_BASE}/reports/compliance-stats`, { headers: getHeaders() }),
+                    fetch(`${API_BASE}/reports/audits?limit=1`, { headers: getHeaders() }),
+                    fetch(`${API_BASE}/reports/remediations?limit=1`, { headers: getHeaders() })
+                ]);
+                
+                if (hostsRes.ok) {
+                    const hostsData = await hostsRes.json();
+                    document.getElementById('total-hosts').textContent = hostsData.total_hosts || 0;
+                }
+                
+                if (statsRes.ok) {
+                    const statsData = await statsRes.json();
+                    document.getElementById('compliance-score').textContent = 
+                        statsData.overall_avg_compliance ? `${statsData.overall_avg_compliance}%` : '-';
+                }
+                
+                if (auditsRes.ok) {
+                    const auditsData = await auditsRes.json();
+                    document.getElementById('total-audits').textContent = auditsData.total || 0;
+                }
+                
+                if (remediationsRes.ok) {
+                    const remediationsData = await remediationsRes.json();
+                    document.getElementById('total-remediations').textContent = remediationsData.total || 0;
+                }
+            } catch (error) {
+                console.error('Error loading stats:', error);
+                showStatus('error', `Failed to load stats: ${error.message}`);
+            }
+        }
+        
+        async function loadAudits() {
+            try {
+                const response = await fetch(`${API_BASE}/reports/audits?limit=20`, {
+                    headers: getHeaders()
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                const audits = data.audits || [];
+                
+                if (audits.length === 0) {
+                    document.getElementById('audits-table').innerHTML = 
+                        '<div class="loading">No audit reports found</div>';
+                    return;
+                }
+                
+                let html = '<table><thead><tr><th>Host</th><th>OS Type</th><th>Compliance</th><th>Rules</th><th>Date</th></tr></thead><tbody>';
+                
+                audits.forEach(audit => {
+                    const date = new Date(audit.created_at).toLocaleString();
+                    const compliance = audit.compliance_score || 0;
+                    const badgeClass = compliance >= 80 ? 'badge-success' : 
+                                      compliance >= 50 ? 'badge-warning' : 'badge-danger';
+                    
+                    html += `
+                        <tr>
+                            <td>${audit.host || 'N/A'}</td>
+                            <td>${audit.os_type || 'N/A'}</td>
+                            <td><span class="badge ${badgeClass}">${compliance}%</span></td>
+                            <td>${audit.total_rules || 0}</td>
+                            <td>${date}</td>
+                        </tr>
+                    `;
+                });
+                
+                html += '</tbody></table>';
+                document.getElementById('audits-table').innerHTML = html;
+            } catch (error) {
+                console.error('Error loading audits:', error);
+                document.getElementById('audits-table').innerHTML = 
+                    `<div class="loading" style="color: red;">Error: ${error.message}</div>`;
+            }
+        }
+        
+        async function loadHosts() {
+            try {
+                const response = await fetch(`${API_BASE}/reports/hosts`, {
+                    headers: getHeaders()
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                const hosts = data.hosts || [];
+                
+                if (hosts.length === 0) {
+                    document.getElementById('audits-table').innerHTML = 
+                        '<div class="loading">No hosts found</div>';
+                    return;
+                }
+                
+                let html = '<table><thead><tr><th>Host</th><th>OS Type</th><th>Compliance</th><th>Last Audit</th><th>Audit Count</th></tr></thead><tbody>';
+                
+                hosts.forEach(host => {
+                    const date = host.latest_audit_time ? new Date(host.latest_audit_time).toLocaleString() : 'Never';
+                    const compliance = host.compliance_score || 0;
+                    const badgeClass = compliance >= 80 ? 'badge-success' : 
+                                      compliance >= 50 ? 'badge-warning' : 'badge-danger';
+                    
+                    html += `
+                        <tr>
+                            <td>${host.host || 'N/A'}</td>
+                            <td>${host.os_type || 'N/A'}</td>
+                            <td><span class="badge ${badgeClass}">${compliance}%</span></td>
+                            <td>${date}</td>
+                            <td>${host.audit_count || 0}</td>
+                        </tr>
+                    `;
+                });
+                
+                html += '</tbody></table>';
+                document.getElementById('audits-table').innerHTML = html;
+            } catch (error) {
+                console.error('Error loading hosts:', error);
+                document.getElementById('audits-table').innerHTML = 
+                    `<div class="loading" style="color: red;">Error: ${error.message}</div>`;
+            }
+        }
+        
+        function showStatus(type, message) {
+            const statusDiv = document.getElementById('api-key-status');
+            statusDiv.className = `status ${type}`;
+            statusDiv.textContent = message;
+            statusDiv.style.display = 'block';
+            
+            setTimeout(() => {
+                statusDiv.style.display = 'none';
+            }, 5000);
+        }
+    </script>
+</body>
+</html>
+

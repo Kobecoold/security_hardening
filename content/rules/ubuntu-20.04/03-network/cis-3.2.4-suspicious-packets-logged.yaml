@@ -1,0 +1,15 @@
+id: cis-ubuntu-20.04-3.2.4
+os: ubuntu-20.04
+title: Ensure suspicious packets are logged
+benchmark: CIS Ubuntu 20.04 LTS
+level: 1
+description: Ensure suspicious packets are logged
+needs_sudo: false
+check:
+  bash: |
+    sysctl net.ipv4.conf.all.log_martians | grep -q "net.ipv4.conf.all.log_martians = 1"
+references:
+  - https://ubuntu.com/security/cis
+controls:
+  - CIS 3.2.4
+

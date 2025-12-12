@@ -1,0 +1,15 @@
+id: cis-ubuntu-20.04-3.2.8
+os: ubuntu-20.04
+title: Ensure TCP SYN Cookies is enabled
+benchmark: CIS Ubuntu 20.04 LTS
+level: 1
+description: Ensure TCP SYN Cookies is enabled
+needs_sudo: false
+check:
+  bash: |
+    sysctl net.ipv4.tcp_syncookies | grep -q "net.ipv4.tcp_syncookies = 1"
+references:
+  - https://ubuntu.com/security/cis
+controls:
+  - CIS 3.2.8
+

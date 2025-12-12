@@ -1,0 +1,15 @@
+id: cis-ubuntu-20.04-2.2.5
+os: ubuntu-20.04
+title: Ensure LDAP server is not installed
+benchmark: CIS Ubuntu 20.04 LTS
+level: 1
+description: Ensure LDAP server is not installed or is disabled
+needs_sudo: false
+check:
+  bash: |
+    ! systemctl is-enabled slapd 2>/dev/null | grep -q enabled
+references:
+  - https://ubuntu.com/security/cis
+controls:
+  - CIS 2.2.5
+

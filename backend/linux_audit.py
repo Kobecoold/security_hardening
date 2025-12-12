@@ -66,24 +66,48 @@ def run_bash_check_stdin(
     script_text: str,
     use_sudo: bool = False,
     sudo_password: Optional[str] = None,
+    timeout: int = 300,
 ) -> Dict:
-    """Truyền script qua stdin. PASS nếu exit code = 0."""
+    """
+    Truyền script qua stdin. PASS nếu exit code = 0.
+    
+    Args:
+        timeout: Timeout in seconds (default 300 = 5 minutes)
+    """
+    import select
+    import socket
+    
     base = "bash -s"
     if use_sudo and sudo_password:
+        # Dùng sudo -S để đọc password từ stdin
+        # KHÔNG dùng get_pty=True vì có thể gây block khi đọc output với PTY
+        # Sudo -S hoạt động tốt với stdin mà không cần PTY
         command = f"sudo -S -p '' {base}"
-        stdin, stdout, stderr = ssh.exec_command(command, get_pty=True)
+        stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
+        
+        # Đợi một chút để channel khởi tạo
+        import time
+        time.sleep(0.15)
+        
+        # Ghi password vào stdin (sudo -S đọc từ stdin)
+        # Phải ghi password TRƯỚC khi ghi script
         try:
             stdin.write(f"{sudo_password}\n")
             stdin.flush()
-        except Exception:
+            # Đợi một chút để sudo xử lý password
+            time.sleep(0.2)
+        except Exception as e:
+            # Log lỗi nhưng vẫn tiếp tục
             pass
     elif use_sudo:
+        # Dùng sudo -n (non-interactive) - chỉ hoạt động nếu có NOPASSWD trong sudoers
         command = f"sudo -n {base}"
-        stdin, stdout, stderr = ssh.exec_command(command)
+        stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
     else:
         command = base
-        stdin, stdout, stderr = ssh.exec_command(command)
+        stdin, stdout, stderr = ssh.exec_command(command, timeout=timeout)
     
+    # Ghi script vào stdin
     try:
         stdin.write(script_text)
         stdin.flush()
@@ -93,9 +117,87 @@ def run_bash_check_stdin(
         except Exception:
             pass
     
-    out = stdout.read().decode().strip()
-    err = stderr.read().decode().strip()
-    exit_status = stdout.channel.recv_exit_status()
+    # Read output with timeout - Cải thiện để tránh treo
+    out = ""
+    err = ""
+    exit_status = -1
+    
+    try:
+        # Wait for command to complete with timeout - đọc output trong khi chờ
+        import time
+        import select
+        
+        start_time = time.time()
+        stdout.channel.settimeout(1.0)  # Set socket timeout để có thể đọc non-blocking
+        stderr.channel.settimeout(1.0)
+        
+        # Đọc output trong khi chờ command hoàn thành
+        while not stdout.channel.exit_status_ready():
+            elapsed = time.time() - start_time
+            if elapsed > timeout:
+                # Force close channels
+                try:
+                    stdout.channel.close()
+                    stderr.channel.close()
+                except:
+                    pass
+                return {
+                    "stdout": out,
+                    "stderr": err + f"\n⚠️ Command timeout after {timeout} seconds",
+                    "exit_status": 124,  # Standard timeout exit code
+                    "status": "TIMEOUT",
+                }
+            
+            # Đọc output nếu có (non-blocking)
+            try:
+                if stdout.channel.recv_ready():
+                    chunk = stdout.channel.recv(4096).decode('utf-8', errors='ignore')
+                    out += chunk
+                if stderr.channel.recv_stderr_ready():
+                    chunk = stderr.channel.recv_stderr(4096).decode('utf-8', errors='ignore')
+                    err += chunk
+            except socket.timeout:
+                # Socket timeout là bình thường khi chờ
+                pass
+            except Exception:
+                # Ignore other errors khi đọc
+                pass
+            
+            # Sleep ngắn để không tốn CPU
+            time.sleep(0.1)
+        
+        # Command đã hoàn thành, đọc phần còn lại
+        try:
+            remaining_out = stdout.read().decode('utf-8', errors='ignore')
+            if remaining_out:
+                out += remaining_out
+        except:
+            pass
+        
+        try:
+            remaining_err = stderr.read().decode('utf-8', errors='ignore')
+            if remaining_err:
+                err += remaining_err
+        except:
+            pass
+        
+        # Lấy exit status
+        exit_status = stdout.channel.recv_exit_status()
+        
+    except socket.timeout:
+        return {
+            "stdout": out,
+            "stderr": err + f"\n⚠️ SSH connection timeout after {timeout} seconds",
+            "exit_status": 124,
+            "status": "TIMEOUT",
+        }
+    except Exception as e:
+        return {
+            "stdout": out,
+            "stderr": err + f"\n⚠️ Error reading output: {str(e)}",
+            "exit_status": -1,
+            "status": "ERROR",
+        }
     
     return {
         "stdout": out,
@@ -117,3 +219,36 @@ def truncate_output(text: str, limit: int = 8192) -> Dict:
         "sha256": hashlib.sha256(text.encode()).hexdigest(),
     }
 
+
+def get_linux_host_info(ssh: paramiko.SSHClient) -> Dict:
+    """Lấy thông tin host Linux tương tự get_windows_host_info."""
+    try:
+        # Lấy hostname
+        stdin, stdout, stderr = ssh.exec_command("hostname")
+        hostname = stdout.read().decode().strip()
+        exit_code = stdout.channel.recv_exit_status()
+        
+        if exit_code != 0:
+            hostname = "Unknown"
+        
+        # Detect OS
+        os_type = detect_os(ssh)
+        
+        # Lấy thêm thông tin kernel version (optional)
+        stdin, stdout, stderr = ssh.exec_command("uname -r")
+        kernel_version = stdout.read().decode().strip() if stdout.channel.recv_exit_status() == 0 else "Unknown"
+        
+        return {
+            "status": "SUCCESS",
+            "hostname": hostname,
+            "os_type": os_type,
+            "kernel_version": kernel_version,
+            "exit_code": exit_code,
+            "message": "SSH connection successful"
+        }
+    except Exception as e:
+        return {
+            "status": "FAILED",
+            "error": str(e),
+            "message": "SSH connection failed"
+        }

@@ -1,0 +1,15 @@
+id: cis-ubuntu-20.04-1.4.1
+os: ubuntu-20.04
+title: Ensure bootloader password is set
+benchmark: CIS Ubuntu 20.04 LTS
+level: 1
+description: Ensure permissions on bootloader config are configured
+needs_sudo: true
+check:
+  bash: |
+    stat -L -c "%a %u %g" /boot/grub/grub.cfg | grep -E "^0 0 0$"
+references:
+  - https://ubuntu.com/security/cis
+controls:
+  - CIS 1.4.1
+
