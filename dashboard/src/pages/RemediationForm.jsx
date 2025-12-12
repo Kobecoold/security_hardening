@@ -311,6 +311,13 @@ export default function RemediationForm() {
                 <h2>Connection Details</h2>
                 
                 <div className="form-group">
+                  <label>Host</label>
+                  <div className="host-display">
+                    <strong>{formData.host || 'Not specified'}</strong>
+                  </div>
+                </div>
+
+                <div className="form-group">
                   <label htmlFor="username">Username</label>
                   <input
                     id="username"

@@ -886,7 +886,6 @@ async def remediate_linux(
                 print("⚠️ No check command found in rule for verification")
         except Exception as verify_error:
             print(f"❌ Verification check failed: {verify_error}")
-            import traceback
             traceback.print_exc()
         
         # Chuẩn bị dữ liệu remediation để lưu vào MongoDB

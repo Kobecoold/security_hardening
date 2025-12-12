@@ -139,8 +139,10 @@ export function AuthProvider({ children }) {
         const apiKey = response.data.api_key
         localStorage.setItem('api_key', apiKey)
         if (response.data.user) {
+          const userRole = response.data.user.role || 'user'
           localStorage.setItem('user_info', JSON.stringify(response.data.user))
-          setUserRole(response.data.user.role || 'user')
+          setUserRole(userRole)
+          console.log('User logged in with role:', userRole, 'isAdmin:', userRole === 'admin')
         }
         setApiKey(apiKey)
         api.setApiKey(apiKey)
@@ -179,7 +181,7 @@ export function AuthProvider({ children }) {
     setUserRole(null)
   }
 
-  const isAdmin = userRole === 'admin'
+  const isAdmin = userRole === 'admin' || false
 
   const value = {
     apiKey,

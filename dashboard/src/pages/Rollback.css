@@ -293,3 +293,12 @@
   100% { transform: rotate(360deg); }
 }
 
+.host-display {
+  padding: 12px 16px;
+  background: #f9fafb;
+  border: 2px solid #e5e7eb;
+  border-radius: 8px;
+  color: #1f2937;
+  font-size: 14px;
+}
+

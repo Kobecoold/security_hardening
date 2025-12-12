@@ -18,7 +18,12 @@ import './Dashboard.css'
 
 export default function Dashboard() {
   const navigate = useNavigate()
-  const { isAdmin } = useAuth()
+  const { isAdmin, userRole } = useAuth()
+  
+  // Debug admin status
+  useEffect(() => {
+    console.log('Dashboard - isAdmin:', isAdmin, 'userRole:', userRole)
+  }, [isAdmin, userRole])
   const [stats, setStats] = useState({
     totalHosts: 0,
     complianceScore: 0,
