@@ -202,6 +202,30 @@
   color: #374151;
 }
 
+.detail-row.backup-contents {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.backup-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.backup-item-tag {
+  display: inline-block;
+  padding: 4px 10px;
+  background: #eff6ff;
+  color: #1e40af;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid #bfdbfe;
+}
+
 .detail-row strong {
   color: #1f2937;
   min-width: 80px;

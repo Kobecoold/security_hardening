@@ -199,16 +199,23 @@
   display: flex;
   gap: 16px;
   margin-bottom: 16px;
-  align-items: flex-end;
+  align-items: flex-start;
 }
 
 .rules-header .form-group {
   flex: 1;
+  margin: 0;
+}
+
+.rules-header .form-group label {
+  margin-bottom: 8px;
 }
 
 .rules-actions {
   display: flex;
   gap: 8px;
+  align-items: flex-start;
+  padding-top: 24px;
 }
 
 .btn-select-all,

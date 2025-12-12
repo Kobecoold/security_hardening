@@ -19,7 +19,7 @@ export default function Rollback() {
   // Connection form
   const [formData, setFormData] = useState({
     username: '',
-    key_path: '~/.ssh/id_ed25519',
+    key_path: '',
     password: '',
     sudo_password: ''
   })
@@ -276,17 +276,6 @@ export default function Rollback() {
                 />
               </div>
 
-              <div className="form-group">
-                <label htmlFor="key_path">SSH Key Path</label>
-                <input
-                  id="key_path"
-                  name="key_path"
-                  type="text"
-                  value={formData.key_path}
-                  onChange={handleChange}
-                  placeholder="~/.ssh/id_ed25519"
-                />
-              </div>
 
               <div className="form-group">
                 <label htmlFor="password">Password (if not using SSH key)</label>

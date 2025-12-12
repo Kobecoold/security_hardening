@@ -20,7 +20,7 @@ export default function RemediationForm() {
     os_type: osType || 'linux',
     rule_ids: [], // Multi-select rules
     username: '',
-    key_path: '~/.ssh/id_ed25519',
+    key_path: '',
     password: '',
     use_sudo: true,
     sudo_password: '',
@@ -369,17 +369,6 @@ export default function RemediationForm() {
                   />
                 </div>
 
-                <div className="form-group">
-                  <label htmlFor="key_path">SSH Key Path</label>
-                  <input
-                    id="key_path"
-                    name="key_path"
-                    type="text"
-                    value={formData.key_path}
-                    onChange={handleChange}
-                    placeholder="~/.ssh/id_ed25519"
-                  />
-                </div>
 
                 <div className="form-group">
                   <label htmlFor="password">Password (if not using SSH key)</label>

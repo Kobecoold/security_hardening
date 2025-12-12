@@ -203,9 +203,38 @@ export default function Backups() {
                   </div>
 
                   {backup.data && (
-                    <div className="detail-row">
-                      <strong>Data Items:</strong>
-                      <span>{Object.keys(backup.data).length} items</span>
+                    <div className="detail-row backup-contents">
+                      <strong>Backup Contents:</strong>
+                      <div className="backup-items">
+                        {Object.keys(backup.data)
+                          .filter(key => key !== 'backup_info')
+                          .map(key => {
+                            // Format key names for display
+                            let displayName = key
+                            if (key.startsWith('file_')) {
+                              displayName = key.replace('file_', '').replace(/_/g, '/')
+                            } else if (key === 'ssh_config') {
+                              displayName = 'SSH Config'
+                            } else if (key === 'password_policy') {
+                              displayName = 'Password Policy'
+                            } else if (key === 'security_policy') {
+                              displayName = 'Security Policy'
+                            } else if (key === 'audit_logon') {
+                              displayName = 'Audit Policy'
+                            } else if (key === 'admin_account_active') {
+                              displayName = 'Admin Account Status'
+                            } else if (key === 'ssh_service_status') {
+                              displayName = 'SSH Service Status'
+                            } else {
+                              displayName = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+                            }
+                            return (
+                              <span key={key} className="backup-item-tag">
+                                {displayName}
+                              </span>
+                            )
+                          })}
+                      </div>
                     </div>
                   )}
                 </div>
