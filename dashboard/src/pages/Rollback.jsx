@@ -173,24 +173,6 @@ export default function Rollback() {
               </select>
             </div>
 
-            <button 
-              type="button" 
-              onClick={loadBackups} 
-              disabled={!host || loadingBackups}
-              className="btn-check-backups"
-            >
-              {loadingBackups ? (
-                <>
-                  <Loader size={16} className="spinner" />
-                  Loading...
-                </>
-              ) : (
-                <>
-                  <Server size={16} />
-                  Check Available Backups
-                </>
-              )}
-            </button>
           </div>
 
           {backups.length > 0 && (

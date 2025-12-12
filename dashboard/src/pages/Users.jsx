@@ -47,7 +47,7 @@ export default function UsersPage() {
       formData.append('username', newUser.username)
       formData.append('password', newUser.password)
       formData.append('email', newUser.email)
-      formData.append('role', newUser.role)
+      // Role luôn là 'user' - không gửi role từ client (backend sẽ force)
 
       const response = await api.post('/auth/users/register', formData, {
         headers: {
@@ -147,10 +147,11 @@ export default function UsersPage() {
                 value={newUser.role}
                 onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
                 required
+                disabled
               >
                 <option value="user">User (View Only)</option>
-                <option value="admin">Admin (Full Access)</option>
               </select>
+              <small>Only one admin account is allowed. New users can only be created as regular users.</small>
             </div>
 
             <div className="form-actions">
