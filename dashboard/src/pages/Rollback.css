@@ -339,12 +339,47 @@
 .info-note {
   margin-top: 8px;
   padding: 12px;
-  background: #dbeafe;
-  border-left: 4px solid #3b82f6;
+  background: #fef3c7;
+  border-left: 4px solid #f59e0b;
   border-radius: 4px;
   font-size: 13px;
-  color: #1e40af;
-  font-style: italic;
+  color: #92400e;
+}
+
+.info-note strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #78350f;
+}
+
+.info-note ul {
+  margin: 8px 0 0 0;
+  padding-left: 20px;
+}
+
+.info-note li {
+  margin: 4px 0;
+  line-height: 1.5;
+}
+
+.info-note code {
+  background: #fef3c7;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 12px;
+  color: #92400e;
+  border: 1px solid #fbbf24;
+}
+
+.status-fail {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.status-pass {
+  color: #10b981;
+  font-weight: 600;
 }
 
 .section-note {

@@ -254,6 +254,71 @@
   margin-left: 4px;
 }
 
+.rollback-section {
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  background: #fffbeb;
+  border: 1px solid #fbbf24;
+  border-radius: 8px;
+  margin-top: 8px;
+}
+
+.rollback-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rollback-explanation {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.explanation-text {
+  font-size: 13px;
+  color: #78350f;
+  line-height: 1.6;
+}
+
+.explanation-text strong {
+  color: #92400e;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.explanation-text ul {
+  margin: 8px 0 0 0;
+  padding-left: 20px;
+}
+
+.explanation-text li {
+  margin: 6px 0;
+  line-height: 1.5;
+}
+
+.explanation-text code {
+  background: #fef3c7;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 11px;
+  color: #92400e;
+  border: 1px solid #fbbf24;
+}
+
+.status-fail {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.status-pass {
+  color: #10b981;
+  font-weight: 600;
+}
+
 .remediation-output {
   background: #f9fafb;
   border-radius: 8px;

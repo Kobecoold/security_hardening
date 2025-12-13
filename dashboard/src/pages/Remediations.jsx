@@ -155,28 +155,42 @@ export default function Remediations() {
                 </div>
               )}
               {remediation.rollback_status && (
-                <div className="detail-item">
-                  <strong>Rollback Status:</strong>{' '}
-                  <span className={remediation.rollback_status === 'AVAILABLE' ? 'rollback-available' : 'rollback-unavailable'}>
-                    {remediation.rollback_status}
-                  </span>
-                  {remediation.rollback_status === 'AVAILABLE' && remediation.backup_id && userRole && String(userRole).trim().toLowerCase() === 'admin' && (
-                    <button
-                      onClick={() => navigate('/rollback', {
-                        state: {
-                          host: remediation.host,
-                          osType: remediation.os_type || remediation.os || remediation.client_type === 'linux' ? 'linux' : 'windows',
-                          selectedBackup: remediation.backup_id,
-                          remediationId: remediation.remediation_id || remediation._id,
-                          ruleId: remediation.rule_id
-                        }
-                      })}
-                      className="btn-rollback-small"
-                      title={`Rollback to state before remediation of rule ${remediation.rule_id || 'N/A'}`}
-                    >
-                      <RotateCcw size={14} />
-                      Rollback this Remediation
-                    </button>
+                <div className="detail-item rollback-section">
+                  <div className="rollback-status-row">
+                    <strong>Rollback Status:</strong>{' '}
+                    <span className={remediation.rollback_status === 'AVAILABLE' ? 'rollback-available' : 'rollback-unavailable'}>
+                      {remediation.rollback_status}
+                    </span>
+                  </div>
+                  {remediation.rollback_status === 'AVAILABLE' && remediation.backup_id && (
+                    <div className="rollback-explanation">
+                      <div className="explanation-text">
+                        <strong>⚠️ Rollback sẽ khôi phục về trạng thái TRƯỚC khi remediation:</strong>
+                        <ul>
+                          <li>Trước remediation: Rule <code>{remediation.rule_id || 'N/A'}</code> ở trạng thái <strong className="status-fail">FAIL</strong></li>
+                          <li>Sau remediation: Rule <code>{remediation.rule_id || 'N/A'}</code> ở trạng thái <strong className="status-pass">PASS</strong></li>
+                          <li>Rollback: Sẽ restore về trạng thái <strong className="status-fail">FAIL</strong> (trước khi remediation)</li>
+                        </ul>
+                      </div>
+                      {userRole && String(userRole).trim().toLowerCase() === 'admin' && (
+                        <button
+                          onClick={() => navigate('/rollback', {
+                            state: {
+                              host: remediation.host,
+                              osType: remediation.os_type || remediation.os || remediation.client_type === 'linux' ? 'linux' : 'windows',
+                              selectedBackup: remediation.backup_id,
+                              remediationId: remediation.remediation_id || remediation._id,
+                              ruleId: remediation.rule_id
+                            }
+                          })}
+                          className="btn-rollback-small"
+                          title={`Rollback rule ${remediation.rule_id || 'N/A'} về trạng thái FAIL (trước khi remediation)`}
+                        >
+                          <RotateCcw size={14} />
+                          Rollback về trạng thái FAIL
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
