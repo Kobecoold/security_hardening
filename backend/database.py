@@ -19,6 +19,7 @@ class AuditDB:
             self.audits = self.db["audit_reports"]
             self.remediations = self.db["remediation_logs"] 
             self.backups = self.db["system_backups"]  # THÊM COLLECTION BACKUPS
+            self.backup_schedules = self.db["backup_schedules"]  # Scheduled backups
             
             # Kiểm tra collections
             print(f"✅ Collections: {self.db.list_collection_names()}")
@@ -171,13 +172,14 @@ class AuditDB:
             raise
     
     def cleanup_old_backups(self, days: int = 7) -> int:
-        """Xóa các backup cũ hơn số ngày chỉ định (mặc định 7 ngày)."""
+        """Xóa các backup cũ hơn số ngày chỉ định (mặc định 7 ngày). Chỉ xóa rule backups, không xóa system backups."""
         try:
             from datetime import timedelta
             cutoff_date = datetime.utcnow() - timedelta(days=days)
             
-            # Xóa backups có timestamp hoặc created_at cũ hơn cutoff_date
+            # Chỉ xóa rule backups (pre_remediation_backup), không xóa system_backup
             query = {
+                "type": "pre_remediation_backup",
                 "$or": [
                     {"timestamp": {"$lt": cutoff_date}},
                     {"created_at": {"$lt": cutoff_date}}
@@ -186,10 +188,60 @@ class AuditDB:
             
             result = self.backups.delete_many(query)
             deleted_count = result.deleted_count
-            print(f"✅ Cleaned up {deleted_count} backups older than {days} days")
+            print(f"✅ Cleaned up {deleted_count} rule backups older than {days} days")
             return deleted_count
         except Exception as e:
             print(f"❌ Failed to cleanup old backups: {e}")
+            raise
+    
+    def save_backup_schedule(self, schedule_data: Dict) -> str:
+        """Lưu scheduled backup vào MongoDB."""
+        try:
+            schedule_id = str(uuid.uuid4())
+            schedule_data["_id"] = schedule_id
+            schedule_data["schedule_id"] = schedule_id
+            schedule_data["created_at"] = datetime.utcnow()
+            
+            self.backup_schedules.insert_one(schedule_data)
+            print(f"✅ Backup schedule saved: {schedule_id}")
+            return schedule_id
+        except Exception as e:
+            print(f"❌ Failed to save backup schedule: {e}")
+            raise
+    
+    def get_backup_schedules(self) -> List[Dict]:
+        """Lấy danh sách scheduled backups."""
+        try:
+            schedules = list(self.backup_schedules.find({}).sort("created_at", -1))
+            for schedule in schedules:
+                schedule["_id"] = str(schedule["_id"])
+            return schedules
+        except Exception as e:
+            print(f"❌ Failed to get backup schedules: {e}")
+            return []
+    
+    def delete_backup_schedule(self, schedule_id: str) -> bool:
+        """Xóa scheduled backup."""
+        try:
+            result = self.backup_schedules.delete_one({"_id": schedule_id})
+            if result.deleted_count > 0:
+                print(f"✅ Schedule deleted: {schedule_id}")
+                return True
+            return False
+        except Exception as e:
+            print(f"❌ Failed to delete schedule: {e}")
+            raise
+    
+    def update_backup_schedule(self, schedule_id: str, update_data: Dict) -> bool:
+        """Cập nhật scheduled backup."""
+        try:
+            result = self.backup_schedules.update_one(
+                {"_id": schedule_id},
+                {"$set": update_data}
+            )
+            return result.modified_count > 0
+        except Exception as e:
+            print(f"❌ Failed to update schedule: {e}")
             raise
 
 # Kết nối đến MongoDB Docker container

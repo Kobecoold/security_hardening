@@ -11,6 +11,7 @@ import RemediationForm from './pages/RemediationForm'
 import Rollback from './pages/Rollback'
 import Backups from './pages/Backups'
 import BackupDetail from './pages/BackupDetail'
+import SystemBackups from './pages/SystemBackups'
 import Users from './pages/Users'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import Login from './pages/Login'
@@ -54,6 +55,7 @@ function AppRoutes() {
         <Route path="rollback" element={<Rollback />} />
         <Route path="backups" element={<Backups />} />
         <Route path="backups/:id" element={<BackupDetail />} />
+        <Route path="system-backups" element={<SystemBackups />} />
         <Route path="users" element={<Users />} />
       </Route>
     </Routes>

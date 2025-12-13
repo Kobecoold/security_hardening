@@ -21,8 +21,11 @@ export default function Layout() {
     { path: '/hosts', label: 'Hosts', icon: Server },
     { path: '/audits', label: 'Audits', icon: FileCheck },
     { path: '/remediations', label: 'Remediations', icon: Wrench },
-    { path: '/backups', label: 'Backups', icon: Database },
-    ...(userRole === 'admin' ? [{ path: '/users', label: 'Users', icon: Users }] : [])
+    { path: '/backups', label: 'Rule Backups', icon: Database },
+    ...(userRole === 'admin' ? [
+      { path: '/system-backups', label: 'System Backups', icon: Database },
+      { path: '/users', label: 'Users', icon: Users }
+    ] : [])
   ]
 
   return (

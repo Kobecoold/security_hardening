@@ -138,8 +138,14 @@ export default function Backups() {
   return (
     <div className="backups-page">
       <div className="page-header">
-        <h1>System Backups</h1>
+        <h1>Rule Backups</h1>
         <div className="header-actions">
+          {userRole === 'admin' && (
+            <button onClick={() => navigate('/system-backups')} className="btn-system-backups">
+              <Database size={18} />
+              System Backups
+            </button>
+          )}
           <button onClick={loadBackups} className="refresh-btn">
             <RefreshCw size={18} />
             Refresh
@@ -187,8 +193,13 @@ export default function Backups() {
       {filteredBackups.length === 0 ? (
         <div className="empty-state">
           <Database size={48} />
-          <h3>No backups found</h3>
-          <p>Backups will appear here after running remediations with backup enabled.</p>
+          <h3>No rule backups found</h3>
+          <p>Rule backups are created automatically when running remediations. They allow you to rollback remediation changes.</p>
+          {userRole === 'admin' && (
+            <p style={{ marginTop: '12px' }}>
+              For system backups, go to <strong>System Backups</strong> page.
+            </p>
+          )}
         </div>
       ) : (
         <div className="backups-grid">

@@ -61,12 +61,85 @@ def cleanup_old_backups_job():
     except Exception as e:
         print(f"❌ Scheduled cleanup failed: {e}")
 
+def run_scheduled_backups_job():
+    """Job chạy scheduled system backups."""
+    try:
+        print("🔄 Running scheduled system backups...")
+        schedules = db.get_backup_schedules()
+        enabled_schedules = [s for s in schedules if s.get("enabled", True)]
+        
+        from datetime import datetime
+        now = datetime.utcnow()
+        current_hour = now.hour
+        current_minute = now.minute
+        current_day = now.weekday()  # 0 = Monday, 6 = Sunday
+        current_date = now.day
+        
+        for schedule in enabled_schedules:
+            try:
+                schedule_time = schedule.get("time", "02:00")
+                schedule_type = schedule.get("scheduleType", "daily")
+                time_parts = schedule_time.split(":")
+                schedule_hour = int(time_parts[0])
+                schedule_minute = int(time_parts[1])
+                
+                should_run = False
+                
+                if schedule_type == "daily":
+                    # Chạy mỗi ngày tại thời điểm chỉ định
+                    should_run = (current_hour == schedule_hour and current_minute == schedule_minute)
+                elif schedule_type == "weekly":
+                    # Chạy mỗi tuần vào thứ 2 (Monday) tại thời điểm chỉ định
+                    should_run = (current_day == 0 and current_hour == schedule_hour and current_minute == schedule_minute)
+                elif schedule_type == "monthly":
+                    # Chạy mỗi tháng vào ngày 1 tại thời điểm chỉ định
+                    should_run = (current_date == 1 and current_hour == schedule_hour and current_minute == schedule_minute)
+                
+                if should_run:
+                    print(f"🔄 Running scheduled backup for {schedule.get('host')}...")
+                    os_type = schedule.get("osType", "linux")
+                    
+                    if os_type == "linux" or os_type.startswith("ubuntu") or os_type.startswith("debian"):
+                        backup_id = system_backup_manager.create_linux_system_backup(
+                            schedule.get("host"),
+                            schedule.get("username", ""),
+                            schedule.get("key_path", "~/.ssh/id_ed25519"),
+                            schedule.get("password"),
+                            schedule.get("sudo_password")
+                        )
+                    else:
+                        backup_id = system_backup_manager.create_windows_system_backup(
+                            schedule.get("host"),
+                            schedule.get("username", "Administrator"),
+                            schedule.get("password")
+                        )
+                    
+                    if backup_id:
+                        print(f"✅ Scheduled backup created: {backup_id}")
+                    else:
+                        print(f"⚠️ Scheduled backup failed for {schedule.get('host')}")
+            except Exception as schedule_error:
+                print(f"❌ Error running scheduled backup for {schedule.get('host')}: {schedule_error}")
+        
+        print(f"✅ Scheduled backups check completed")
+    except Exception as e:
+        print(f"❌ Scheduled backups job failed: {e}")
+
 # Schedule cleanup job chạy mỗi ngày lúc 2:00 AM
 scheduler.add_job(
     cleanup_old_backups_job,
     trigger=CronTrigger(hour=2, minute=0),
     id='cleanup_old_backups',
     name='Cleanup backups older than 7 days',
+    replace_existing=True
+)
+
+# Schedule backup job chạy mỗi phút để check scheduled backups
+scheduler.add_job(
+    run_scheduled_backups_job,
+    trigger=CronTrigger(minute='*'),  # Chạy mỗi phút
+    id='run_scheduled_backups',
+    name='Run scheduled system backups',
     replace_existing=True
 )
 
@@ -882,6 +955,89 @@ async def get_system_backups(host: Optional[str] = None, os_type: Optional[str] 
             backup["_id"] = str(backup["_id"])
         
         return {"total": len(backups), "backups": backups}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/backups/schedules", dependencies=[RequireAdmin])
+async def create_backup_schedule(
+    host: str = Form(...),
+    osType: str = Form(...),
+    username: str = Form(""),
+    key_path: Optional[str] = Form("~/.ssh/id_ed25519"),
+    password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+    sudo_password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+    scheduleType: str = Form(...),  # daily, weekly, monthly
+    time: str = Form(...),  # HH:MM format
+    enabled: bool = Form(True)
+):
+    """Create a scheduled system backup."""
+    try:
+        schedule_data = {
+            "host": host,
+            "osType": osType,
+            "username": username,
+            "key_path": key_path,
+            "password": password,
+            "sudo_password": sudo_password,
+            "scheduleType": scheduleType,
+            "time": time,
+            "enabled": enabled
+        }
+        schedule_id = db.save_backup_schedule(schedule_data)
+        return {
+            "status": "success",
+            "message": "Backup schedule created successfully",
+            "schedule_id": schedule_id
+        }
+    except Exception as e:
+        print(f"❌ Failed to create schedule: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/backups/schedules", dependencies=[RequireAuth])
+async def get_backup_schedules():
+    """Get all backup schedules."""
+    try:
+        schedules = db.get_backup_schedules()
+        return {"total": len(schedules), "schedules": schedules}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/backups/schedules/{schedule_id}", dependencies=[RequireAdmin])
+async def delete_backup_schedule(schedule_id: str):
+    """Delete a backup schedule."""
+    try:
+        success = db.delete_backup_schedule(schedule_id)
+        if success:
+            return {"status": "success", "message": "Schedule deleted successfully"}
+        else:
+            raise HTTPException(status_code=404, detail="Schedule not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.patch("/backups/schedules/{schedule_id}", dependencies=[RequireAdmin])
+async def update_backup_schedule(
+    schedule_id: str,
+    enabled: Optional[bool] = Form(None)
+):
+    """Update a backup schedule."""
+    try:
+        update_data = {}
+        if enabled is not None:
+            update_data["enabled"] = enabled
+        
+        if not update_data:
+            raise HTTPException(status_code=400, detail="No update data provided")
+        
+        success = db.update_backup_schedule(schedule_id, update_data)
+        if success:
+            return {"status": "success", "message": "Schedule updated successfully"}
+        else:
+            raise HTTPException(status_code=404, detail="Schedule not found")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
