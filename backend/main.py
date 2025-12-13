@@ -902,14 +902,31 @@ async def cleanup_old_backups(days: int = 7):
 async def create_system_backup_linux(
     Host: str = Form(...),
     Username: str = Form(""),
-    Key_path: Optional[str] = Form("~/.ssh/id_ed25519"),
     Password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
     Sudo_password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+    backup_ssh_config: Optional[str] = Form("true"),
+    backup_users_groups: Optional[str] = Form("true"),
+    backup_network_config: Optional[str] = Form("true"),
+    backup_security_config: Optional[str] = Form("true"),
+    backup_system_services: Optional[str] = Form("true"),
+    backup_firewall_config: Optional[str] = Form("true"),
+    backup_logging_config: Optional[str] = Form("true"),
+    backup_system_info: Optional[str] = Form("true"),
 ):
     """Create independent system backup for Linux - backup important system files."""
     try:
+        backup_options = {
+            "ssh_config": backup_ssh_config.lower() == "true",
+            "users_groups": backup_users_groups.lower() == "true",
+            "network_config": backup_network_config.lower() == "true",
+            "security_config": backup_security_config.lower() == "true",
+            "system_services": backup_system_services.lower() == "true",
+            "firewall_config": backup_firewall_config.lower() == "true",
+            "logging_config": backup_logging_config.lower() == "true",
+            "system_info": backup_system_info.lower() == "true",
+        }
         backup_id = system_backup_manager.create_linux_system_backup(
-            Host, Username, Key_path or "", Password, Sudo_password
+            Host, Username, "", Password, Sudo_password, backup_options
         )
         if backup_id:
             return {
@@ -932,11 +949,21 @@ async def create_system_backup_windows(
     host: str = Form(...),
     username: str = Form("Administrator"),
     password: str = Form(..., json_schema_extra={"format": "password"}),
+    backup_ssh_config: Optional[str] = Form("true"),  # Registry keys
+    backup_users_groups: Optional[str] = Form("true"),  # Security policies
+    backup_firewall_config: Optional[str] = Form("true"),
+    backup_system_info: Optional[str] = Form("true"),
 ):
     """Create independent system backup for Windows - backup important system configurations."""
     try:
+        backup_options = {
+            "registry_keys": backup_ssh_config.lower() == "true",
+            "security_policies": backup_users_groups.lower() == "true",
+            "firewall_rules": backup_firewall_config.lower() == "true",
+            "system_info": backup_system_info.lower() == "true",
+        }
         backup_id = system_backup_manager.create_windows_system_backup(
-            host, username, password
+            host, username, password, backup_options
         )
         if backup_id:
             return {

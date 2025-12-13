@@ -20,7 +20,8 @@ class SystemBackupManager:
         username: str,
         key_path: str = "",
         password: Optional[str] = None,
-        sudo_password: Optional[str] = None
+        sudo_password: Optional[str] = None,
+        backup_options: Optional[Dict] = None
     ) -> Optional[str]:
         """Create system backup for Linux - backup important system files."""
         try:
@@ -37,51 +38,82 @@ class SystemBackupManager:
             }
             
             try:
+                # Default backup options (all enabled)
+                options = backup_options or {
+                    "ssh_config": True,
+                    "users_groups": True,
+                    "network_config": True,
+                    "security_config": True,
+                    "system_services": True,
+                    "firewall_config": True,
+                    "logging_config": True,
+                    "system_info": True,
+                }
+                
                 # Important system files to backup for Linux
-                important_files = [
-                    # SSH Configuration
-                    "/etc/ssh/sshd_config",
-                    "/etc/ssh/ssh_config",
-                    
-                    # User and Group Management
-                    "/etc/passwd",
-                    "/etc/group",
-                    "/etc/shadow",  # With sudo only
-                    "/etc/gshadow",  # With sudo only
-                    
-                    # System Configuration
-                    "/etc/hosts",
-                    "/etc/hostname",
-                    "/etc/resolv.conf",
-                    "/etc/nsswitch.conf",
-                    "/etc/fstab",
-                    "/etc/mtab",
-                    
-                    # Security Configuration
-                    "/etc/sudoers",
-                    "/etc/sudoers.d",  # Directory listing
-                    "/etc/security/limits.conf",
-                    "/etc/security/pwquality.conf",
-                    
-                    # Network Configuration
-                    "/etc/network/interfaces",  # Debian/Ubuntu
-                    "/etc/sysconfig/network-scripts/ifcfg-*",  # RHEL/CentOS (will need special handling)
-                    "/etc/netplan",  # Ubuntu 18.04+
-                    
-                    # System Services
-                    "/etc/crontab",
-                    "/etc/cron.d",  # Directory listing
-                    "/etc/systemd/system",  # Directory listing
-                    
-                    # Firewall Configuration
-                    "/etc/ufw/ufw.conf",  # Ubuntu
-                    "/etc/firewalld/firewalld.conf",  # RHEL/CentOS
-                    "/etc/iptables/rules.v4",  # iptables rules
-                    
-                    # Logging Configuration
-                    "/etc/rsyslog.conf",
-                    "/etc/logrotate.conf",
-                ]
+                important_files = []
+                
+                # SSH Configuration
+                if options.get("ssh_config", True):
+                    important_files.extend([
+                        "/etc/ssh/sshd_config",
+                        "/etc/ssh/ssh_config",
+                    ])
+                
+                # User and Group Management
+                if options.get("users_groups", True):
+                    important_files.extend([
+                        "/etc/passwd",
+                        "/etc/group",
+                        "/etc/shadow",  # With sudo only
+                        "/etc/gshadow",  # With sudo only
+                    ])
+                
+                # Network Configuration
+                if options.get("network_config", True):
+                    important_files.extend([
+                        "/etc/hosts",
+                        "/etc/hostname",
+                        "/etc/resolv.conf",
+                        "/etc/nsswitch.conf",
+                        "/etc/network/interfaces",  # Debian/Ubuntu
+                        "/etc/sysconfig/network-scripts/ifcfg-*",  # RHEL/CentOS
+                        "/etc/netplan",  # Ubuntu 18.04+
+                    ])
+                
+                # Security Configuration
+                if options.get("security_config", True):
+                    important_files.extend([
+                        "/etc/sudoers",
+                        "/etc/sudoers.d",  # Directory listing
+                        "/etc/security/limits.conf",
+                        "/etc/security/pwquality.conf",
+                    ])
+                
+                # System Services
+                if options.get("system_services", True):
+                    important_files.extend([
+                        "/etc/fstab",
+                        "/etc/mtab",
+                        "/etc/crontab",
+                        "/etc/cron.d",  # Directory listing
+                        "/etc/systemd/system",  # Directory listing
+                    ])
+                
+                # Firewall Configuration
+                if options.get("firewall_config", True):
+                    important_files.extend([
+                        "/etc/ufw/ufw.conf",  # Ubuntu
+                        "/etc/firewalld/firewalld.conf",  # RHEL/CentOS
+                        "/etc/iptables/rules.v4",  # iptables rules
+                    ])
+                
+                # Logging Configuration
+                if options.get("logging_config", True):
+                    important_files.extend([
+                        "/etc/rsyslog.conf",
+                        "/etc/logrotate.conf",
+                    ])
                 
                 for file_path in important_files:
                     try:
@@ -128,22 +160,23 @@ class SystemBackupManager:
                         print(f"   ⚠️ Failed to backup {file_path}: {e}")
                 
                 # Backup system information
-                try:
-                    print("🔍 Backing up system information...")
-                    sysinfo_script = """
-                    echo "=== System Info ==="
-                    uname -a
-                    echo "=== Disk Usage ==="
-                    df -h | head -5
-                    echo "=== Network Interfaces ==="
-                    ip addr show | grep -E "^[0-9]+:|inet " | head -10
-                    """
-                    result = run_bash_check_stdin(ssh, sysinfo_script, use_sudo=False, timeout=15)
-                    if result["exit_status"] == 0:
-                        backup_data["data"]["system_info"] = result["stdout"][:10000]
-                        print("   ✓ System info backed up")
-                except Exception as e:
-                    print(f"   ⚠️ Failed to backup system info: {e}")
+                if options.get("system_info", True):
+                    try:
+                        print("🔍 Backing up system information...")
+                        sysinfo_script = """
+                        echo "=== System Info ==="
+                        uname -a
+                        echo "=== Disk Usage ==="
+                        df -h | head -5
+                        echo "=== Network Interfaces ==="
+                        ip addr show | grep -E "^[0-9]+:|inet " | head -10
+                        """
+                        result = run_bash_check_stdin(ssh, sysinfo_script, use_sudo=False, timeout=15)
+                        if result["exit_status"] == 0:
+                            backup_data["data"]["system_info"] = result["stdout"][:10000]
+                            print("   ✓ System info backed up")
+                    except Exception as e:
+                        print(f"   ⚠️ Failed to backup system info: {e}")
                 
                 # Add backup metadata
                 backup_data["data"]["backup_info"] = {
@@ -173,7 +206,8 @@ class SystemBackupManager:
         self,
         host: str,
         username: str,
-        password: str
+        password: str,
+        backup_options: Optional[Dict] = None
     ) -> Optional[str]:
         """Create system backup for Windows - backup important system configurations."""
         try:
@@ -189,28 +223,37 @@ class SystemBackupManager:
                 "data": {}
             }
             
+            # Default backup options (all enabled)
+            options = backup_options or {
+                "registry_keys": True,
+                "security_policies": True,
+                "firewall_rules": True,
+                "system_info": True,
+            }
+            
             # Backup important Windows configurations
             try:
                 # 1. Backup Registry (important keys for security)
-                registry_keys = [
-                    # Security Policies
-                    "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
-                    "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Security",
-                    "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\Security",
+                if options.get("registry_keys", True):
+                    registry_keys = [
+                        # Security Policies
+                        "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
+                        "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Security",
+                        "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\Security",
+                        
+                        # Network Configuration
+                        "HKLM\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters",
+                        "HKLM\\SYSTEM\\CurrentControlSet\\Services\\RemoteRegistry",
+                        "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Remote Assistance",
+                        
+                        # Firewall
+                        "HKLM\\SYSTEM\\CurrentControlSet\\Services\\SharedAccess\\Parameters\\FirewallPolicy",
+                        
+                        # User Rights
+                        "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa",
+                    ]
                     
-                    # Network Configuration
-                    "HKLM\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters",
-                    "HKLM\\SYSTEM\\CurrentControlSet\\Services\\RemoteRegistry",
-                    "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Remote Assistance",
-                    
-                    # Firewall
-                    "HKLM\\SYSTEM\\CurrentControlSet\\Services\\SharedAccess\\Parameters\\FirewallPolicy",
-                    
-                    # User Rights
-                    "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa",
-                ]
-                
-                for key in registry_keys:
+                    for key in registry_keys:
                     try:
                         print(f"🔍 Backing up registry: {key}...")
                         result = session.run_cmd(f'reg query "{key}" /s')
@@ -222,13 +265,14 @@ class SystemBackupManager:
                         print(f"   ⚠️ Failed to backup {key}: {e}")
                 
                 # 2. Backup Security Policies
-                try:
-                    print("🔍 Backing up security policies...")
-                    secpol_commands = [
-                        'net accounts',
-                        'net localgroup Administrators',
-                        'secedit /export /cfg C:\\temp\\secpol.txt',
-                    ]
+                if options.get("security_policies", True):
+                    try:
+                        print("🔍 Backing up security policies...")
+                        secpol_commands = [
+                            'net accounts',
+                            'net localgroup Administrators',
+                            'secedit /export /cfg C:\\temp\\secpol.txt',
+                        ]
                     security_data = {}
                     for cmd in secpol_commands:
                         try:
@@ -249,36 +293,38 @@ class SystemBackupManager:
                         except Exception as e:
                             print(f"   ⚠️ Failed to run {cmd}: {e}")
                     
-                    if security_data:
-                        backup_data["data"]["security_policy"] = security_data
-                        print("   ✓ Security policies backed up")
-                except Exception as e:
-                    print(f"   ⚠️ Failed to backup security policies: {e}")
+                        if security_data:
+                            backup_data["data"]["security_policy"] = security_data
+                            print("   ✓ Security policies backed up")
+                    except Exception as e:
+                        print(f"   ⚠️ Failed to backup security policies: {e}")
                 
                 # 3. Backup Firewall Rules
-                try:
-                    print("🔍 Backing up firewall rules...")
-                    result = session.run_ps('Get-NetFirewallRule | Select-Object Name,DisplayName,Enabled,Direction,Action | ConvertTo-Json')
-                    if result.status_code == 0:
-                        backup_data["data"]["firewall_rules"] = result.std_out.decode()[:50000]
-                        print("   ✓ Firewall rules backed up")
-                except Exception as e:
-                    print(f"   ⚠️ Failed to backup firewall rules: {e}")
+                if options.get("firewall_rules", True):
+                    try:
+                        print("🔍 Backing up firewall rules...")
+                        result = session.run_ps('Get-NetFirewallRule | Select-Object Name,DisplayName,Enabled,Direction,Action | ConvertTo-Json')
+                        if result.status_code == 0:
+                            backup_data["data"]["firewall_rules"] = result.std_out.decode()[:50000]
+                            print("   ✓ Firewall rules backed up")
+                    except Exception as e:
+                        print(f"   ⚠️ Failed to backup firewall rules: {e}")
                 
                 # 4. Backup System Information
-                try:
-                    print("🔍 Backing up system information...")
-                    sysinfo_script = """
-                    systeminfo | findstr /C:"OS Name" /C:"OS Version" /C:"System Type" /C:"Total Physical Memory"
-                    wmic logicaldisk get size,freespace,caption
-                    wmic service get name,displayname,startmode,state
-                    """
-                    result = session.run_cmd(sysinfo_script)
-                    if result.status_code == 0:
-                        backup_data["data"]["system_info"] = result.std_out.decode()[:20000]
-                        print("   ✓ System info backed up")
-                except Exception as e:
-                    print(f"   ⚠️ Failed to backup system info: {e}")
+                if options.get("system_info", True):
+                    try:
+                        print("🔍 Backing up system information...")
+                        sysinfo_script = """
+                        systeminfo | findstr /C:"OS Name" /C:"OS Version" /C:"System Type" /C:"Total Physical Memory"
+                        wmic logicaldisk get size,freespace,caption
+                        wmic service get name,displayname,startmode,state
+                        """
+                        result = session.run_cmd(sysinfo_script)
+                        if result.status_code == 0:
+                            backup_data["data"]["system_info"] = result.std_out.decode()[:20000]
+                            print("   ✓ System info backed up")
+                    except Exception as e:
+                        print(f"   ⚠️ Failed to backup system info: {e}")
                 
                 # Add backup metadata
                 backup_data["data"]["backup_info"] = {

@@ -22,21 +22,39 @@ export default function SystemBackups() {
     host: '',
     osType: 'linux',
     username: '',
-    key_path: '~/.ssh/id_ed25519',
     password: '',
-    sudo_password: ''
+    sudo_password: '',
+    backupOptions: {
+      ssh_config: true,
+      users_groups: true,
+      network_config: true,
+      security_config: true,
+      system_services: true,
+      firewall_config: true,
+      logging_config: true,
+      system_info: true
+    }
   })
 
   const [scheduleData, setScheduleData] = useState({
     host: '',
     osType: 'linux',
     username: '',
-    key_path: '~/.ssh/id_ed25519',
     password: '',
     sudo_password: '',
     scheduleType: 'daily', // daily, weekly, monthly
     time: '02:00', // HH:MM format
-    enabled: true
+    enabled: true,
+    backupOptions: {
+      ssh_config: true,
+      users_groups: true,
+      network_config: true,
+      security_config: true,
+      system_services: true,
+      firewall_config: true,
+      logging_config: true,
+      system_info: true
+    }
   })
 
   useEffect(() => {
@@ -85,9 +103,12 @@ export default function SystemBackups() {
       if (formData.osType === 'linux' || formData.osType.startsWith('ubuntu') || formData.osType.startsWith('debian')) {
         formDataToSend.append('Host', formData.host)
         formDataToSend.append('Username', formData.username)
-        if (formData.key_path) formDataToSend.append('Key_path', formData.key_path)
         if (formData.password) formDataToSend.append('Password', formData.password)
         if (formData.sudo_password) formDataToSend.append('Sudo_password', formData.sudo_password)
+        // Add backup options
+        Object.keys(formData.backupOptions).forEach(key => {
+          formDataToSend.append(`backup_${key}`, formData.backupOptions[key].toString())
+        })
 
         const response = await api.post('/backups/system/linux', formDataToSend, {
           headers: { 'Content-Type': 'multipart/form-data' }
@@ -99,15 +120,28 @@ export default function SystemBackups() {
           host: '',
           osType: 'linux',
           username: '',
-          key_path: '~/.ssh/id_ed25519',
           password: '',
-          sudo_password: ''
+          sudo_password: '',
+          backupOptions: {
+            ssh_config: true,
+            users_groups: true,
+            network_config: true,
+            security_config: true,
+            system_services: true,
+            firewall_config: true,
+            logging_config: true,
+            system_info: true
+          }
         })
         loadSystemBackups()
       } else {
         formDataToSend.append('host', formData.host)
         formDataToSend.append('username', formData.username || 'Administrator')
         formDataToSend.append('password', formData.password)
+        // Add backup options for Windows
+        Object.keys(formData.backupOptions).forEach(key => {
+          formDataToSend.append(`backup_${key}`, formData.backupOptions[key].toString())
+        })
 
         const response = await api.post('/backups/system/windows', formDataToSend, {
           headers: { 'Content-Type': 'multipart/form-data' }
@@ -119,9 +153,18 @@ export default function SystemBackups() {
           host: '',
           osType: 'linux',
           username: '',
-          key_path: '~/.ssh/id_ed25519',
           password: '',
-          sudo_password: ''
+          sudo_password: '',
+          backupOptions: {
+            ssh_config: true,
+            users_groups: true,
+            network_config: true,
+            security_config: true,
+            system_services: true,
+            firewall_config: true,
+            logging_config: true,
+            system_info: true
+          }
         })
         loadSystemBackups()
       }
@@ -143,12 +186,15 @@ export default function SystemBackups() {
       formDataToSend.append('host', scheduleData.host)
       formDataToSend.append('osType', scheduleData.osType)
       formDataToSend.append('username', scheduleData.username)
-      if (scheduleData.key_path) formDataToSend.append('key_path', scheduleData.key_path)
       if (scheduleData.password) formDataToSend.append('password', scheduleData.password)
       if (scheduleData.sudo_password) formDataToSend.append('sudo_password', scheduleData.sudo_password)
       formDataToSend.append('scheduleType', scheduleData.scheduleType)
       formDataToSend.append('time', scheduleData.time)
       formDataToSend.append('enabled', scheduleData.enabled.toString())
+      // Add backup options
+      Object.keys(scheduleData.backupOptions).forEach(key => {
+        formDataToSend.append(`backup_${key}`, scheduleData.backupOptions[key].toString())
+      })
 
       const response = await api.post('/backups/schedules', formDataToSend, {
         headers: { 'Content-Type': 'multipart/form-data' }
@@ -159,12 +205,21 @@ export default function SystemBackups() {
         host: '',
         osType: 'linux',
         username: '',
-        key_path: '~/.ssh/id_ed25519',
         password: '',
         sudo_password: '',
         scheduleType: 'daily',
         time: '02:00',
-        enabled: true
+        enabled: true,
+        backupOptions: {
+          ssh_config: true,
+          users_groups: true,
+          network_config: true,
+          security_config: true,
+          system_services: true,
+          firewall_config: true,
+          logging_config: true,
+          system_info: true
+        }
       })
       loadScheduledBackups()
     } catch (err) {
@@ -452,17 +507,7 @@ export default function SystemBackups() {
                   </div>
 
                   <div className="form-group">
-                    <label>SSH Key Path</label>
-                    <input
-                      type="text"
-                      value={formData.key_path}
-                      onChange={(e) => setFormData({ ...formData, key_path: e.target.value })}
-                      placeholder="~/.ssh/id_ed25519"
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label>Password (if not using SSH key)</label>
+                    <label>Password</label>
                     <input
                       type="password"
                       value={formData.password}
@@ -479,6 +524,100 @@ export default function SystemBackups() {
                       onChange={(e) => setFormData({ ...formData, sudo_password: e.target.value })}
                       placeholder="Sudo password if required"
                     />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Backup Options *</label>
+                    <div className="backup-options">
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={formData.backupOptions.ssh_config}
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            backupOptions: { ...formData.backupOptions, ssh_config: e.target.checked }
+                          })}
+                        />
+                        <span>SSH Configuration</span>
+                      </label>
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={formData.backupOptions.users_groups}
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            backupOptions: { ...formData.backupOptions, users_groups: e.target.checked }
+                          })}
+                        />
+                        <span>Users & Groups</span>
+                      </label>
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={formData.backupOptions.network_config}
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            backupOptions: { ...formData.backupOptions, network_config: e.target.checked }
+                          })}
+                        />
+                        <span>Network Configuration</span>
+                      </label>
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={formData.backupOptions.security_config}
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            backupOptions: { ...formData.backupOptions, security_config: e.target.checked }
+                          })}
+                        />
+                        <span>Security Configuration</span>
+                      </label>
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={formData.backupOptions.system_services}
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            backupOptions: { ...formData.backupOptions, system_services: e.target.checked }
+                          })}
+                        />
+                        <span>System Services</span>
+                      </label>
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={formData.backupOptions.firewall_config}
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            backupOptions: { ...formData.backupOptions, firewall_config: e.target.checked }
+                          })}
+                        />
+                        <span>Firewall Configuration</span>
+                      </label>
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={formData.backupOptions.logging_config}
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            backupOptions: { ...formData.backupOptions, logging_config: e.target.checked }
+                          })}
+                        />
+                        <span>Logging Configuration</span>
+                      </label>
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={formData.backupOptions.system_info}
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            backupOptions: { ...formData.backupOptions, system_info: e.target.checked }
+                          })}
+                        />
+                        <span>System Information</span>
+                      </label>
+                    </div>
                   </div>
                 </>
               ) : (
@@ -502,6 +641,56 @@ export default function SystemBackups() {
                       placeholder="Windows password"
                       required
                     />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Backup Options *</label>
+                    <div className="backup-options">
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={formData.backupOptions.ssh_config}
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            backupOptions: { ...formData.backupOptions, ssh_config: e.target.checked }
+                          })}
+                        />
+                        <span>Registry Keys</span>
+                      </label>
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={formData.backupOptions.users_groups}
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            backupOptions: { ...formData.backupOptions, users_groups: e.target.checked }
+                          })}
+                        />
+                        <span>Security Policies</span>
+                      </label>
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={formData.backupOptions.firewall_config}
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            backupOptions: { ...formData.backupOptions, firewall_config: e.target.checked }
+                          })}
+                        />
+                        <span>Firewall Rules</span>
+                      </label>
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={formData.backupOptions.system_info}
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            backupOptions: { ...formData.backupOptions, system_info: e.target.checked }
+                          })}
+                        />
+                        <span>System Information</span>
+                      </label>
+                    </div>
                   </div>
                 </>
               )}
@@ -588,17 +777,7 @@ export default function SystemBackups() {
                   </div>
 
                   <div className="form-group">
-                    <label>SSH Key Path</label>
-                    <input
-                      type="text"
-                      value={scheduleData.key_path}
-                      onChange={(e) => setScheduleData({ ...scheduleData, key_path: e.target.value })}
-                      placeholder="~/.ssh/id_ed25519"
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label>Password (if not using SSH key)</label>
+                    <label>Password</label>
                     <input
                       type="password"
                       value={scheduleData.password}
@@ -615,6 +794,100 @@ export default function SystemBackups() {
                       onChange={(e) => setScheduleData({ ...scheduleData, sudo_password: e.target.value })}
                       placeholder="Sudo password if required"
                     />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Backup Options *</label>
+                    <div className="backup-options">
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={scheduleData.backupOptions.ssh_config}
+                          onChange={(e) => setScheduleData({
+                            ...scheduleData,
+                            backupOptions: { ...scheduleData.backupOptions, ssh_config: e.target.checked }
+                          })}
+                        />
+                        <span>SSH Configuration</span>
+                      </label>
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={scheduleData.backupOptions.users_groups}
+                          onChange={(e) => setScheduleData({
+                            ...scheduleData,
+                            backupOptions: { ...scheduleData.backupOptions, users_groups: e.target.checked }
+                          })}
+                        />
+                        <span>Users & Groups</span>
+                      </label>
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={scheduleData.backupOptions.network_config}
+                          onChange={(e) => setScheduleData({
+                            ...scheduleData,
+                            backupOptions: { ...scheduleData.backupOptions, network_config: e.target.checked }
+                          })}
+                        />
+                        <span>Network Configuration</span>
+                      </label>
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={scheduleData.backupOptions.security_config}
+                          onChange={(e) => setScheduleData({
+                            ...scheduleData,
+                            backupOptions: { ...scheduleData.backupOptions, security_config: e.target.checked }
+                          })}
+                        />
+                        <span>Security Configuration</span>
+                      </label>
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={scheduleData.backupOptions.system_services}
+                          onChange={(e) => setScheduleData({
+                            ...scheduleData,
+                            backupOptions: { ...scheduleData.backupOptions, system_services: e.target.checked }
+                          })}
+                        />
+                        <span>System Services</span>
+                      </label>
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={scheduleData.backupOptions.firewall_config}
+                          onChange={(e) => setScheduleData({
+                            ...scheduleData,
+                            backupOptions: { ...scheduleData.backupOptions, firewall_config: e.target.checked }
+                          })}
+                        />
+                        <span>Firewall Configuration</span>
+                      </label>
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={scheduleData.backupOptions.logging_config}
+                          onChange={(e) => setScheduleData({
+                            ...scheduleData,
+                            backupOptions: { ...scheduleData.backupOptions, logging_config: e.target.checked }
+                          })}
+                        />
+                        <span>Logging Configuration</span>
+                      </label>
+                      <label className="checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={scheduleData.backupOptions.system_info}
+                          onChange={(e) => setScheduleData({
+                            ...scheduleData,
+                            backupOptions: { ...scheduleData.backupOptions, system_info: e.target.checked }
+                          })}
+                        />
+                        <span>System Information</span>
+                      </label>
+                    </div>
                   </div>
                 </>
               ) : (
