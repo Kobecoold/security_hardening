@@ -149,26 +149,34 @@ export default function Remediations() {
                   </div>
                 )}
               {remediation.rollback_status && remediation.rollback_status === 'AVAILABLE' && remediation.backup_id && (
-                <div className={`detail-item rollback-section ${remediation.status === 'SUCCESS' && remediation.verification_passed ? 'rollback-warning' : ''}`}>
-                  <div className="rollback-status-row">
-                    <strong>Rule Backup:</strong>{' '}
-                    <span className="rollback-available">Available</span>
-                    <code className="backup-id-code">{remediation.backup_id}</code>
-                  </div>
-                  {remediation.status === 'SUCCESS' && remediation.verification_passed === true && (
-                    <div className="rollback-explanation">
-                      <div className="explanation-text">
-                        <strong>⚠️ Rollback Warning:</strong>
-                        <p>This remediation was successful. Rolling back will restore the system to its state <strong>before this remediation</strong> was applied.</p>
-                        <ul>
-                          <li>Before remediation: System was in its previous state</li>
-                          <li>After remediation: Rule <code>{remediation.rule_id || 'N/A'}</code> is now <strong className="status-pass">PASS</strong></li>
-                          <li>Rollback will restore: System back to the state before remediation</li>
-                        </ul>
-                      </div>
-                      {userRole && String(userRole).trim().toLowerCase() === 'admin' && (
-                        <button
-                          onClick={() => navigate('/rollback', {
+                <div className="detail-item">
+                  <strong>Rule Backup:</strong>{' '}
+                  <span className="rollback-available">Available</span>
+                  {userRole && String(userRole).trim().toLowerCase() === 'admin' && (
+                    <button
+                      onClick={() => {
+                        if (remediation.status === 'SUCCESS' && remediation.verification_passed === true) {
+                          if (window.confirm(
+                            `⚠️ Rollback Warning\n\n` +
+                            `This remediation was successful. Rolling back will restore the system to its state before this remediation was applied.\n\n` +
+                            `Before remediation: System was in its previous state\n` +
+                            `After remediation: Rule ${remediation.rule_id || 'N/A'} is now PASS\n` +
+                            `Rollback will restore: System back to the state before remediation\n\n` +
+                            `Do you want to continue?`
+                          )) {
+                            navigate('/rollback', {
+                              state: {
+                                host: remediation.host,
+                                osType: remediation.os_type || remediation.os || remediation.client_type === 'linux' ? 'linux' : 'windows',
+                                selectedBackup: remediation.backup_id,
+                                remediationId: remediation.remediation_id || remediation._id,
+                                ruleId: remediation.rule_id,
+                                backupType: 'rules'
+                              }
+                            })
+                          }
+                        } else {
+                          navigate('/rollback', {
                             state: {
                               host: remediation.host,
                               osType: remediation.os_type || remediation.os || remediation.client_type === 'linux' ? 'linux' : 'windows',
@@ -177,39 +185,15 @@ export default function Remediations() {
                               ruleId: remediation.rule_id,
                               backupType: 'rules'
                             }
-                          })}
-                          className="btn-rollback-small"
-                          title={`Rollback to state before remediation of rule ${remediation.rule_id || 'N/A'}`}
-                        >
-                          <RotateCcw size={14} />
-                          Rollback Rule
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  {!(remediation.status === 'SUCCESS' && remediation.verification_passed === true) && (
-                    <div className="rollback-info">
-                      <p>Rule backup is available. You can rollback to restore the rule's previous state.</p>
-                      {userRole && String(userRole).trim().toLowerCase() === 'admin' && (
-                        <button
-                          onClick={() => navigate('/rollback', {
-                            state: {
-                              host: remediation.host,
-                              osType: remediation.os_type || remediation.os || remediation.client_type === 'linux' ? 'linux' : 'windows',
-                              selectedBackup: remediation.backup_id,
-                              remediationId: remediation.remediation_id || remediation._id,
-                              ruleId: remediation.rule_id,
-                              backupType: 'rules'
-                            }
-                          })}
-                          className="btn-rollback-small"
-                          title={`Rollback rule ${remediation.rule_id || 'N/A'}`}
-                        >
-                          <RotateCcw size={14} />
-                          Rollback Rule
-                        </button>
-                      )}
-                    </div>
+                          })
+                        }
+                      }}
+                      className="btn-rollback-small"
+                      title="Rollback rule"
+                    >
+                      <RotateCcw size={14} />
+                      Rollback Rule
+                    </button>
                   )}
                 </div>
               )}
