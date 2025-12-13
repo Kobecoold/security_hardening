@@ -57,6 +57,22 @@ export default function BackupDetail() {
         }
       }
 
+      // Try System backups if not found
+      if (!foundBackup) {
+        try {
+          const systemResponse = await api.get('/backups/system')
+          const systemBackups = systemResponse.data.backups || []
+          foundBackup = systemBackups.find(b => 
+            (b.backup_id || b._id) === id
+          )
+          if (foundBackup) {
+            foundBackup.os_type = foundBackup.os_type || 'unknown'
+          }
+        } catch (err) {
+          console.error('Error loading System backups:', err)
+        }
+      }
+
       if (!foundBackup) {
         setError('Backup not found')
         return
@@ -98,7 +114,12 @@ export default function BackupDetail() {
       setDeleting(true)
       await api.delete(`/backups/${backupId}`)
       alert('Backup deleted successfully')
-      navigate('/backups')
+      // Navigate back based on backup type
+      if (backup.type === 'system_backup') {
+        navigate('/system-backups')
+      } else {
+        navigate('/backups')
+      }
     } catch (err) {
       console.error('Error deleting backup:', err)
       alert(err.response?.data?.detail || 'Failed to delete backup')
@@ -141,7 +162,13 @@ export default function BackupDetail() {
           <AlertCircle size={20} />
           <span>{error || 'Backup not found'}</span>
         </div>
-        <button onClick={() => navigate('/backups')} className="back-btn">
+        <button 
+          onClick={() => {
+            // Try to navigate back to system backups first, then rule backups
+            navigate('/system-backups')
+          }} 
+          className="back-btn"
+        >
           <ArrowLeft size={18} />
           Back to Backups
         </button>
@@ -156,7 +183,17 @@ export default function BackupDetail() {
     <div className="backup-detail-page">
       <div className="page-header">
         <div>
-          <button onClick={() => navigate('/backups')} className="back-btn">
+          <button 
+            onClick={() => {
+              // Navigate back based on backup type
+              if (backup.type === 'system_backup') {
+                navigate('/system-backups')
+              } else {
+                navigate('/backups')
+              }
+            }} 
+            className="back-btn"
+          >
             <ArrowLeft size={18} />
             Back to Backups
           </button>
@@ -164,10 +201,13 @@ export default function BackupDetail() {
         </div>
         {userRole === 'admin' && (
           <div style={{ display: 'flex', gap: '12px' }}>
-            <button onClick={handleRollback} className="btn-rollback-large">
-              <RotateCcw size={18} />
-              Rollback to this Backup
-            </button>
+            {/* Only show rollback button for rule backups, not system backups */}
+            {backup.type !== 'system_backup' && (
+              <button onClick={handleRollback} className="btn-rollback-large">
+                <RotateCcw size={18} />
+                Rollback to this Backup
+              </button>
+            )}
             <button 
               onClick={handleDelete} 
               className="btn-delete-large"
@@ -200,7 +240,9 @@ export default function BackupDetail() {
             </div>
             <div className="info-item">
               <strong>Type:</strong>
-              <span>{backup.type || 'pre_remediation_backup'}</span>
+              <span className={`type-badge ${backup.type === 'system_backup' ? 'system' : 'rule'}`}>
+                {backup.type === 'system_backup' ? 'System Backup' : 'Rule Backup'}
+              </span>
             </div>
             <div className="info-item">
               <Calendar size={16} />

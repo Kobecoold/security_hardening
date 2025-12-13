@@ -156,6 +156,24 @@
   color: #1e40af;
 }
 
+.type-badge {
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.type-badge.system {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.type-badge.rule {
+  background: #fef3c7;
+  color: #92400e;
+}
+
 .data-sections {
   display: flex;
   flex-direction: column;
