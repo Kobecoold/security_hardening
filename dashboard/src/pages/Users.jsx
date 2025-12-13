@@ -154,12 +154,12 @@ export default function UsersPage() {
 
       if (response.data.status === 'success') {
         setDeletingUser(null)
-        loadUsers()
+        // Reload users list immediately
+        await loadUsers()
       }
     } catch (err) {
       console.error('Error deleting user:', err)
       setError(err.response?.data?.detail || 'Failed to delete user')
-    } finally {
       setCreating(false)
     }
   }

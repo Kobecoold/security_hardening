@@ -145,22 +145,26 @@ class UserManager:
         return updated_user
     
     def delete_user(self, username: str) -> bool:
-        """Xóa user (soft delete - set is_active = False)."""
+        """Xóa user (hard delete - xóa hoàn toàn khỏi database)."""
         user = self.users_collection.find_one({"username": username})
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         
         # Không cho phép xóa admin cuối cùng
         if user.get("role") == "admin":
-            admin_count = self.users_collection.count_documents({"role": "admin", "is_active": True})
+            # Đếm tất cả admin (kể cả inactive để đảm bảo an toàn)
+            admin_count = self.users_collection.count_documents({
+                "role": "admin",
+                "$or": [{"is_active": True}, {"is_active": {"$exists": False}}]
+            })
             if admin_count <= 1:
                 raise HTTPException(status_code=400, detail="Cannot delete the last admin user")
         
-        # Soft delete
-        self.users_collection.update_one(
-            {"username": username},
-            {"$set": {"is_active": False}}
-        )
+        # Hard delete - xóa hoàn toàn khỏi database
+        result = self.users_collection.delete_one({"username": username})
+        
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=500, detail="Failed to delete user")
         
         return True
     
