@@ -1076,33 +1076,20 @@ async def register_user(
     username: str = Form(...),
     password: str = Form(..., json_schema_extra={"format": "password"}),
     email: str = Form(""),
-    api_key: Optional[str] = Security(API_KEY_HEADER),
 ):
-    """Đăng ký user mới. Không cần API key cho first user. Admin only cho các user sau."""
+    """Đăng ký user mới. Chỉ cho phép khi chưa có user nào (first user sẽ là admin)."""
     try:
-        # Check if this is the first user (no auth required)
-        is_first_user = not user_manager.has_any_users()
+        # Chỉ cho phép đăng ký khi chưa có user nào
+        if user_manager.has_any_users():
+            raise HTTPException(
+                status_code=403, 
+                detail="Registration is only allowed for the first user. Please contact an admin to create new users."
+            )
         
-        # If not first user, require admin authentication
-        if not is_first_user:
-            if not api_key:
-                raise HTTPException(status_code=401, detail="Authentication required for creating users")
-            
-            if not auth_manager.verify_api_key(api_key):
-                raise HTTPException(status_code=401, detail="Invalid API key")
-            
-            # Check if user is admin
-            user_info = auth_manager.get_api_key_user(api_key)
-            if not user_info or user_info.get("role") != "admin":
-                raise HTTPException(status_code=403, detail="Only admins can create users")
-            
-            # Force role to be 'user' for non-first users (không tin tưởng input từ client)
-            role = "user"
-        else:
-            # First user is always admin
-            role = "admin"
+        # First user is always admin
+        role = "admin"
         
-        # Create user with determined role
+        # Create user
         user = user_manager.create_user(username, password, email, role)
         return {
             "status": "success",
@@ -1114,12 +1101,35 @@ async def register_user(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/auth/users", dependencies=[RequireAuth])
+@app.get("/auth/users", dependencies=[RequireAdmin])
 async def list_users():
     """Lấy danh sách users. Admin only."""
     try:
         users = user_manager.list_users()
         return {"total": len(users), "users": users}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/auth/users/create", dependencies=[RequireAdmin])
+async def create_user_by_admin(
+    username: str = Form(...),
+    password: str = Form(..., json_schema_extra={"format": "password"}),
+    email: str = Form(""),
+):
+    """Admin tạo user mới. Không cần API key trong parameter, check qua RequireAdmin dependency."""
+    try:
+        # Force role to be 'user' (không cho phép tạo admin)
+        role = "user"
+        
+        # Create user
+        user = user_manager.create_user(username, password, email, role)
+        return {
+            "status": "success",
+            "message": "User created successfully",
+            "user": user
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

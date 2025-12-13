@@ -27,13 +27,14 @@ export default function Login() {
   const checkIfUsersExist = async () => {
     try {
       const response = await api.get('/auth/users/count')
-      setHasUsers(response.data.count > 0)
-      if (response.data.count === 0) {
+      const userCount = response.data.count || 0
+      setHasUsers(userCount > 0)
+      if (userCount === 0) {
         setLoginMode('register') // Auto-switch to register if no users
       }
     } catch (err) {
       console.error('Error checking users:', err)
-      // Assume users exist if API call fails
+      // If endpoint doesn't exist or fails, assume users exist
       setHasUsers(true)
     }
   }

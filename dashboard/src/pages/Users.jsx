@@ -49,7 +49,7 @@ export default function UsersPage() {
       formData.append('email', newUser.email)
       // Role luôn là 'user' - không gửi role từ client (backend sẽ force)
 
-      const response = await api.post('/auth/users/register', formData, {
+      const response = await api.post('/auth/users/create', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         }
