@@ -52,12 +52,12 @@
 }
 
 .nav-item.active {
-  background: #667eea;
+  background: #10b981;
   color: white;
 }
 
 .nav-item.active:hover {
-  background: #5568d3;
+  background: #059669;
 }
 
 .sidebar-footer {

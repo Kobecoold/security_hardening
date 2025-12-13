@@ -199,7 +199,7 @@
   display: flex;
   gap: 16px;
   margin-bottom: 16px;
-  align-items: flex-start;
+  align-items: flex-end;
 }
 
 .rules-header .form-group {
@@ -214,8 +214,9 @@
 .rules-actions {
   display: flex;
   gap: 8px;
-  align-items: flex-start;
-  padding-top: 24px;
+  align-items: center;
+  padding-bottom: 0;
+  margin-bottom: 0;
 }
 
 .btn-select-all,

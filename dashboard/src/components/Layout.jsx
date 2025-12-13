@@ -34,7 +34,15 @@ export default function Layout() {
         <nav className="sidebar-nav">
           {navItems.map((item) => {
             const Icon = item.icon
-            const isActive = location.pathname === item.path
+            // Check if current path matches or starts with the nav item path
+            let isActive = false
+            if (item.path === '/') {
+              // For root path, only match exactly
+              isActive = location.pathname === '/'
+            } else {
+              // For other paths, match if pathname starts with the item path
+              isActive = location.pathname === item.path || location.pathname.startsWith(item.path + '/')
+            }
             return (
               <Link
                 key={item.path}
