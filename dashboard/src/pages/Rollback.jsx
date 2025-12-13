@@ -257,7 +257,7 @@ export default function Rollback() {
                   return (
                     <div
                       key={backupId}
-                      className={`backup-item ${isSelected ? 'selected' : ''} ${remediationInfo && remediationInfo.selectedBackup === backupId ? 'remediation-backup' : ''}`}
+                      className={`backup-item ${isSelected ? 'selected' : ''} ${remediationInfo && selectedBackup === backupId ? 'remediation-backup' : ''}`}
                       onClick={() => setSelectedBackup(backupId)}
                     >
                       <div className="backup-header">
@@ -270,7 +270,7 @@ export default function Rollback() {
                         />
                         <div className="backup-info">
                           <strong>Backup ID: {backupId}</strong>
-                          {remediationInfo && remediationInfo.selectedBackup === backupId && (
+                          {remediationInfo && selectedBackup === backupId && (
                             <span className="backup-badge">This Remediation's Backup</span>
                           )}
                           <span className="backup-date">
