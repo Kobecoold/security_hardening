@@ -275,21 +275,21 @@ class SystemBackupManager:
                         ]
                         security_data = {}
                         for cmd in secpol_commands:
-                        try:
-                            if 'secedit' in cmd:
-                                result = session.run_cmd(cmd)
-                                if result.status_code == 0:
-                                    # Read the exported file
-                                    read_result = session.run_cmd('type C:\\temp\\secpol.txt')
-                                    if read_result.status_code == 0:
-                                        security_data["secedit_export"] = read_result.std_out.decode()[:50000]
-                                    # Clean up
-                                    session.run_cmd('del C:\\temp\\secpol.txt')
-                            else:
-                                result = session.run_cmd(cmd)
-                                if result.status_code == 0:
-                                    cmd_name = cmd.replace(' ', '_').replace('/', '_')
-                                    security_data[cmd_name] = result.std_out.decode()[:10000]
+                            try:
+                                if 'secedit' in cmd:
+                                    result = session.run_cmd(cmd)
+                                    if result.status_code == 0:
+                                        # Read the exported file
+                                        read_result = session.run_cmd('type C:\\temp\\secpol.txt')
+                                        if read_result.status_code == 0:
+                                            security_data["secedit_export"] = read_result.std_out.decode()[:50000]
+                                        # Clean up
+                                        session.run_cmd('del C:\\temp\\secpol.txt')
+                                else:
+                                    result = session.run_cmd(cmd)
+                                    if result.status_code == 0:
+                                        cmd_name = cmd.replace(' ', '_').replace('/', '_')
+                                        security_data[cmd_name] = result.std_out.decode()[:10000]
                             except Exception as e:
                                 print(f"   ⚠️ Failed to run {cmd}: {e}")
                         
