@@ -790,12 +790,19 @@ async def rollback_windows(
 
 @app.get("/backups/windows", dependencies=[RequireAuth])
 async def get_windows_backups(host: Optional[str] = None):
-    """Lấy danh sách backups Windows."""
+    """Lấy danh sách rule backups Windows (chỉ pre_remediation_backup)."""
     try:
         if host:
             backups = rollback_manager.get_backups(host)
         else:
-            backups = db.get_backups_not_linux(limit=50)
+            # Chỉ lấy rule backups, không lấy system backups
+            backups = list(db.backups.find(
+                {
+                    "os_type": {"$ne": "linux"},
+                    "type": "pre_remediation_backup"
+                },
+                sort=[("timestamp", -1)]
+            ).limit(50))
             for backup in backups:
                 backup["_id"] = str(backup["_id"])
         
@@ -835,12 +842,19 @@ async def rollback_linux(
 
 @app.get("/backups/linux", dependencies=[RequireAuth])
 async def get_linux_backups(host: Optional[str] = None):
-    """Lấy danh sách backups Linux."""
+    """Lấy danh sách rule backups Linux (chỉ pre_remediation_backup)."""
     try:
         if host:
             backups = linux_rollback_manager.get_backups(host)
         else:
-            backups = db.get_backups_by_os_type("linux", limit=50)
+            # Chỉ lấy rule backups, không lấy system backups
+            backups = list(db.backups.find(
+                {
+                    "os_type": "linux",
+                    "type": "pre_remediation_backup"
+                },
+                sort=[("timestamp", -1)]
+            ).limit(50))
             for backup in backups:
                 backup["_id"] = str(backup["_id"])
         

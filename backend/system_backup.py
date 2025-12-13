@@ -37,24 +37,73 @@ class SystemBackupManager:
             }
             
             try:
-                # Important system files to backup
+                # Important system files to backup for Linux
                 important_files = [
-                    "/etc/ssh/sshd_config",      # SSH configuration
-                    "/etc/passwd",                # User accounts
-                    "/etc/group",                 # Group information
-                    "/etc/sudoers",               # Sudoers configuration (if readable)
-                    "/etc/hosts",                 # Hosts file
-                    "/etc/resolv.conf",          # DNS configuration
-                    "/etc/fstab",                 # Filesystem table
-                    "/etc/crontab",              # System crontab
+                    # SSH Configuration
+                    "/etc/ssh/sshd_config",
+                    "/etc/ssh/ssh_config",
+                    
+                    # User and Group Management
+                    "/etc/passwd",
+                    "/etc/group",
+                    "/etc/shadow",  # With sudo only
+                    "/etc/gshadow",  # With sudo only
+                    
+                    # System Configuration
+                    "/etc/hosts",
+                    "/etc/hostname",
+                    "/etc/resolv.conf",
+                    "/etc/nsswitch.conf",
+                    "/etc/fstab",
+                    "/etc/mtab",
+                    
+                    # Security Configuration
+                    "/etc/sudoers",
+                    "/etc/sudoers.d",  # Directory listing
+                    "/etc/security/limits.conf",
+                    "/etc/security/pwquality.conf",
+                    
+                    # Network Configuration
+                    "/etc/network/interfaces",  # Debian/Ubuntu
+                    "/etc/sysconfig/network-scripts/ifcfg-*",  # RHEL/CentOS (will need special handling)
+                    "/etc/netplan",  # Ubuntu 18.04+
+                    
+                    # System Services
+                    "/etc/crontab",
+                    "/etc/cron.d",  # Directory listing
+                    "/etc/systemd/system",  # Directory listing
+                    
+                    # Firewall Configuration
+                    "/etc/ufw/ufw.conf",  # Ubuntu
+                    "/etc/firewalld/firewalld.conf",  # RHEL/CentOS
+                    "/etc/iptables/rules.v4",  # iptables rules
+                    
+                    # Logging Configuration
+                    "/etc/rsyslog.conf",
+                    "/etc/logrotate.conf",
                 ]
                 
                 for file_path in important_files:
                     try:
+                        # Handle directories differently
+                        if file_path.endswith('*') or '/etc/sudoers.d' in file_path or '/etc/cron.d' in file_path or '/etc/systemd/system' in file_path:
+                            # List directory contents
+                            dir_path = file_path.replace('/*', '').replace('*', '')
+                            print(f"🔍 Backing up directory listing: {dir_path}...")
+                            list_script = f"""
+                            timeout 10 sh -c 'if [ -d {dir_path} ]; then ls -la {dir_path} 2>/dev/null | head -50; fi'
+                            """
+                            result = run_bash_check_stdin(ssh, list_script, use_sudo=False, timeout=15)
+                            if result["exit_status"] == 0 and result["stdout"]:
+                                dir_key = dir_path.replace("/", "_").replace(".", "_")
+                                backup_data["data"][f"dir_listing_{dir_key}"] = result["stdout"][:10000]
+                                print(f"   ✓ {dir_path} directory listing backed up")
+                            continue
+                        
                         print(f"🔍 Backing up {file_path}...")
-                        # Use timeout and limit size
+                        # Use timeout and limit size (100KB per file)
                         backup_script = f"""
-                        timeout 10 sh -c 'if [ -f {file_path} ]; then head -c 50000 {file_path}; fi'
+                        timeout 10 sh -c 'if [ -f {file_path} ]; then head -c 100000 {file_path}; fi'
                         """
                         result = run_bash_check_stdin(
                             ssh, backup_script, use_sudo=False, timeout=15
@@ -62,16 +111,16 @@ class SystemBackupManager:
                         
                         if result["exit_status"] == 0 and result["stdout"]:
                             file_key = file_path.replace("/", "_").replace(".", "_")
-                            backup_data["data"][f"file_{file_key}"] = result["stdout"][:50000]
+                            backup_data["data"][f"file_{file_key}"] = result["stdout"][:100000]
                             print(f"   ✓ {file_path} backed up ({len(result['stdout'])} bytes)")
                         else:
-                            # Try with sudo for protected files
+                            # Try with sudo for protected files (shadow, sudoers, etc.)
                             result_sudo = run_bash_check_stdin(
                                 ssh, backup_script, use_sudo=True, sudo_password=sudo_password, timeout=15
                             )
                             if result_sudo["exit_status"] == 0 and result_sudo["stdout"]:
                                 file_key = file_path.replace("/", "_").replace(".", "_")
-                                backup_data["data"][f"file_{file_key}"] = result_sudo["stdout"][:50000]
+                                backup_data["data"][f"file_{file_key}"] = result_sudo["stdout"][:100000]
                                 print(f"   ✓ {file_path} backed up with sudo ({len(result_sudo['stdout'])} bytes)")
                             else:
                                 print(f"   ⚠️ Skipped {file_path} (not accessible)")
@@ -142,11 +191,23 @@ class SystemBackupManager:
             
             # Backup important Windows configurations
             try:
-                # 1. Backup Registry (important keys)
+                # 1. Backup Registry (important keys for security)
                 registry_keys = [
+                    # Security Policies
+                    "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
+                    "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Security",
+                    "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\Security",
+                    
+                    # Network Configuration
+                    "HKLM\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters",
                     "HKLM\\SYSTEM\\CurrentControlSet\\Services\\RemoteRegistry",
                     "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Remote Assistance",
-                    "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies",
+                    
+                    # Firewall
+                    "HKLM\\SYSTEM\\CurrentControlSet\\Services\\SharedAccess\\Parameters\\FirewallPolicy",
+                    
+                    # User Rights
+                    "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa",
                 ]
                 
                 for key in registry_keys:
@@ -155,7 +216,7 @@ class SystemBackupManager:
                         result = session.run_cmd(f'reg query "{key}" /s')
                         if result.status_code == 0:
                             key_name = key.replace("\\", "_").replace(":", "_")
-                            backup_data["data"][f"registry_{key_name}"] = result.std_out.decode()[:50000]
+                            backup_data["data"][f"registry_{key_name}"] = result.std_out.decode()[:100000]
                             print(f"   ✓ {key} backed up")
                     except Exception as e:
                         print(f"   ⚠️ Failed to backup {key}: {e}")
@@ -163,23 +224,58 @@ class SystemBackupManager:
                 # 2. Backup Security Policies
                 try:
                     print("🔍 Backing up security policies...")
-                    result = session.run_cmd('net accounts')
-                    if result.status_code == 0:
-                        backup_data["data"]["security_policy"] = result.std_out.decode()[:10000]
+                    secpol_commands = [
+                        'net accounts',
+                        'net localgroup Administrators',
+                        'secedit /export /cfg C:\\temp\\secpol.txt',
+                    ]
+                    security_data = {}
+                    for cmd in secpol_commands:
+                        try:
+                            if 'secedit' in cmd:
+                                result = session.run_cmd(cmd)
+                                if result.status_code == 0:
+                                    # Read the exported file
+                                    read_result = session.run_cmd('type C:\\temp\\secpol.txt')
+                                    if read_result.status_code == 0:
+                                        security_data["secedit_export"] = read_result.std_out.decode()[:50000]
+                                    # Clean up
+                                    session.run_cmd('del C:\\temp\\secpol.txt')
+                            else:
+                                result = session.run_cmd(cmd)
+                                if result.status_code == 0:
+                                    cmd_name = cmd.replace(' ', '_').replace('/', '_')
+                                    security_data[cmd_name] = result.std_out.decode()[:10000]
+                        except Exception as e:
+                            print(f"   ⚠️ Failed to run {cmd}: {e}")
+                    
+                    if security_data:
+                        backup_data["data"]["security_policy"] = security_data
                         print("   ✓ Security policies backed up")
                 except Exception as e:
                     print(f"   ⚠️ Failed to backup security policies: {e}")
                 
-                # 3. Backup System Information
+                # 3. Backup Firewall Rules
+                try:
+                    print("🔍 Backing up firewall rules...")
+                    result = session.run_ps('Get-NetFirewallRule | Select-Object Name,DisplayName,Enabled,Direction,Action | ConvertTo-Json')
+                    if result.status_code == 0:
+                        backup_data["data"]["firewall_rules"] = result.std_out.decode()[:50000]
+                        print("   ✓ Firewall rules backed up")
+                except Exception as e:
+                    print(f"   ⚠️ Failed to backup firewall rules: {e}")
+                
+                # 4. Backup System Information
                 try:
                     print("🔍 Backing up system information...")
                     sysinfo_script = """
-                    systeminfo | findstr /C:"OS Name" /C:"OS Version" /C:"System Type"
+                    systeminfo | findstr /C:"OS Name" /C:"OS Version" /C:"System Type" /C:"Total Physical Memory"
                     wmic logicaldisk get size,freespace,caption
+                    wmic service get name,displayname,startmode,state
                     """
-                    result = session.run_ps(sysinfo_script)
+                    result = session.run_cmd(sysinfo_script)
                     if result.status_code == 0:
-                        backup_data["data"]["system_info"] = result.std_out.decode()[:10000]
+                        backup_data["data"]["system_info"] = result.std_out.decode()[:20000]
                         print("   ✓ System info backed up")
                 except Exception as e:
                     print(f"   ⚠️ Failed to backup system info: {e}")

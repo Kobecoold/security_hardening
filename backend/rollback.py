@@ -285,9 +285,15 @@ class RollbackManager:
             print(f"⚠️ Failed to update remediation status: {e}")
     
     def get_backups(self, host: str) -> list:
-        """Lấy danh sách backups cho một host."""
+        """Lấy danh sách rule backups cho một Windows host (chỉ pre_remediation_backup)."""
         try:
-            backups = list(self.db.backups.find({"host": host}, sort=[("timestamp", -1)]))
+            backups = list(self.db.backups.find(
+                {
+                    "host": host,
+                    "type": "pre_remediation_backup"  # Chỉ lấy rule backups
+                },
+                sort=[("timestamp", -1)]
+            ))
             for backup in backups:
                 backup["_id"] = str(backup["_id"])
             return backups
