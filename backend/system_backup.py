@@ -254,15 +254,15 @@ class SystemBackupManager:
                     ]
                     
                     for key in registry_keys:
-                    try:
-                        print(f"🔍 Backing up registry: {key}...")
-                        result = session.run_cmd(f'reg query "{key}" /s')
-                        if result.status_code == 0:
-                            key_name = key.replace("\\", "_").replace(":", "_")
-                            backup_data["data"][f"registry_{key_name}"] = result.std_out.decode()[:100000]
-                            print(f"   ✓ {key} backed up")
-                    except Exception as e:
-                        print(f"   ⚠️ Failed to backup {key}: {e}")
+                        try:
+                            print(f"🔍 Backing up registry: {key}...")
+                            result = session.run_cmd(f'reg query "{key}" /s')
+                            if result.status_code == 0:
+                                key_name = key.replace("\\", "_").replace(":", "_")
+                                backup_data["data"][f"registry_{key_name}"] = result.std_out.decode()[:100000]
+                                print(f"   ✓ {key} backed up")
+                        except Exception as e:
+                            print(f"   ⚠️ Failed to backup {key}: {e}")
                 
                 # 2. Backup Security Policies
                 if options.get("security_policies", True):
