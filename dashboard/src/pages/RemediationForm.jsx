@@ -46,10 +46,14 @@ export default function RemediationForm() {
   }, [auditId])
 
   useEffect(() => {
-    if (formData.os_type && !auditId) {
+    // When host and os_type are provided, load failed rules from latest audit
+    if (formData.host && formData.os_type && !auditId) {
+      loadFailedRulesFromLatestAudit()
+    } else if (formData.os_type && !formData.host && !auditId) {
+      // If only os_type is provided, load all available rules (fallback)
       loadAvailableRules()
     }
-  }, [formData.os_type])
+  }, [formData.host, formData.os_type])
 
   const loadFailedRulesFromAudit = async (auditId) => {
     try {
@@ -57,12 +61,27 @@ export default function RemediationForm() {
       const response = await api.get(`/reports/audits/${auditId}`)
       const audit = response.data
       
-      // Filter failed rules
-      const failed = (audit.results || []).filter(r => 
-        r.exit_status !== 0 && r.status !== 'PASS' && r.status !== 'SKIPPED'
-      )
+      // Filter failed rules (FAIL, ERROR, or exit_status !== 0)
+      const failed = (audit.results || []).filter(r => {
+        const status = (r.status || '').toUpperCase()
+        return (
+          status === 'FAIL' || 
+          status === 'ERROR' || 
+          (r.exit_status !== undefined && r.exit_status !== 0 && status !== 'PASS' && status !== 'SKIPPED')
+        )
+      })
       
-      setFailedRules(failed)
+      // Map to rule format with id, title, description, level
+      const failedRulesFormatted = failed.map(r => ({
+        id: r.id,
+        title: r.title || r.id,
+        description: r.description || r.reason || '',
+        level: r.level || '1',
+        status: r.status,
+        exit_status: r.exit_status
+      }))
+      
+      setFailedRules(failedRulesFormatted)
       setFormData(prev => ({
         ...prev,
         host: audit.host || prev.host,
@@ -70,6 +89,58 @@ export default function RemediationForm() {
       }))
     } catch (err) {
       console.error('Error loading audit:', err)
+      setError('Failed to load audit. Please check audit ID.')
+    } finally {
+      setLoadingRules(false)
+    }
+  }
+
+  const loadFailedRulesFromLatestAudit = async () => {
+    try {
+      setLoadingRules(true)
+      setError('')
+      
+      // Get latest audit for this host
+      const auditsResponse = await api.get(`/reports/audits?host=${formData.host}&limit=1`)
+      const audits = auditsResponse.data.audits || []
+      
+      if (audits.length === 0) {
+        setError(`No audit found for host ${formData.host}. Please run an audit first.`)
+        setFailedRules([])
+        return
+      }
+      
+      const latestAudit = audits[0]
+      
+      // Filter failed rules
+      const failed = (latestAudit.results || []).filter(r => {
+        const status = (r.status || '').toUpperCase()
+        return (
+          status === 'FAIL' || 
+          status === 'ERROR' || 
+          (r.exit_status !== undefined && r.exit_status !== 0 && status !== 'PASS' && status !== 'SKIPPED')
+        )
+      })
+      
+      // Map to rule format
+      const failedRulesFormatted = failed.map(r => ({
+        id: r.id,
+        title: r.title || r.id,
+        description: r.description || r.reason || '',
+        level: r.level || '1',
+        status: r.status,
+        exit_status: r.exit_status
+      }))
+      
+      setFailedRules(failedRulesFormatted)
+      
+      if (failedRulesFormatted.length === 0) {
+        setError(`No failed rules found in the latest audit for ${formData.host}. All rules are passing!`)
+      }
+    } catch (err) {
+      console.error('Error loading latest audit:', err)
+      setError(`Failed to load audit for host ${formData.host}. ${err.response?.data?.detail || err.message}`)
+      setFailedRules([])
     } finally {
       setLoadingRules(false)
     }
@@ -312,15 +383,32 @@ export default function RemediationForm() {
                     <div className="rules-selection-info">
                       <span>
                         {formData.rule_ids.length} rule(s) selected
-                        {failedRules.length > 0 && ' (from failed audit)'}
+                        {failedRules.length > 0 && (
+                          <span className="failed-rules-badge">
+                            ({failedRules.length} failed rule(s) from latest audit)
+                          </span>
+                        )}
                       </span>
                     </div>
+
+                    {failedRules.length > 0 && (
+                      <div className="info-banner">
+                        <AlertCircle size={16} />
+                        <span>Showing only FAILED rules from the latest audit for {formData.host}. Only rules that need remediation are displayed.</span>
+                      </div>
+                    )}
 
                     <div className="rules-list">
                       {getFilteredRules().length === 0 ? (
                         <div className="no-rules">
                           <AlertCircle size={20} />
-                          <span>No rules found. {formData.os_type ? `Try changing OS type or check if rules exist for ${formData.os_type}` : 'Please select OS type first'}</span>
+                          <span>
+                            {formData.host && failedRules.length === 0 
+                              ? `No failed rules found for ${formData.host}. All rules are passing! Please run an audit first if you haven't.`
+                              : formData.os_type 
+                                ? `No rules found. Try changing OS type or check if rules exist for ${formData.os_type}`
+                                : 'Please select OS type and enter host first'}
+                          </span>
                         </div>
                       ) : (
                         getFilteredRules()
@@ -341,9 +429,16 @@ export default function RemediationForm() {
                                     {rule.description && (
                                       <div className="rule-description">{rule.description}</div>
                                     )}
-                                    {rule.level && (
-                                      <span className="rule-level">Level: {rule.level}</span>
-                                    )}
+                                    <div className="rule-meta">
+                                      {rule.level && (
+                                        <span className="rule-level">Level: {rule.level}</span>
+                                      )}
+                                      {rule.status && (
+                                        <span className={`rule-status rule-status-${(rule.status || '').toLowerCase()}`}>
+                                          Status: {rule.status}
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                 </label>
                               </div>
