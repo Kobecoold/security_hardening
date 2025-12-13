@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
-import { Users, Plus, RefreshCw, Shield, User, Mail, AlertCircle } from 'lucide-react'
+import { Users, Plus, RefreshCw, Shield, User, Mail, AlertCircle, Edit, Trash2, KeyRound } from 'lucide-react'
 import './Users.css'
 
 export default function UsersPage() {
@@ -11,12 +11,19 @@ export default function UsersPage() {
   const [error, setError] = useState(null)
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [editingUser, setEditingUser] = useState(null)
+  const [deletingUser, setDeletingUser] = useState(null)
 
   const [newUser, setNewUser] = useState({
     username: '',
     password: '',
     email: '',
     role: 'user'
+  })
+
+  const [editUser, setEditUser] = useState({
+    email: '',
+    password: ''
   })
 
   useEffect(() => {
@@ -63,6 +70,98 @@ export default function UsersPage() {
     } catch (err) {
       console.error('Error creating user:', err)
       setError(err.response?.data?.detail || 'Failed to create user')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleEditUser = (user) => {
+    setEditingUser(user)
+    setEditUser({
+      email: user.email || '',
+      password: ''
+    })
+    setError(null)
+  }
+
+  const handleUpdateUser = async (e) => {
+    e.preventDefault()
+    setError(null)
+    setCreating(true)
+
+    try {
+      const formData = new FormData()
+      if (editUser.email !== editingUser.email) {
+        formData.append('email', editUser.email)
+      }
+      if (editUser.password) {
+        formData.append('password', editUser.password)
+      }
+
+      const response = await api.put(`/auth/users/${editingUser.username}`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      })
+
+      if (response.data.status === 'success') {
+        setEditingUser(null)
+        setEditUser({ email: '', password: '' })
+        loadUsers()
+      }
+    } catch (err) {
+      console.error('Error updating user:', err)
+      setError(err.response?.data?.detail || 'Failed to update user')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleDeleteUser = (user) => {
+    setDeletingUser(user)
+  }
+
+  const confirmDeleteUser = async () => {
+    if (!deletingUser) return
+
+    setError(null)
+    setCreating(true)
+
+    try {
+      const response = await api.delete(`/auth/users/${deletingUser.username}`)
+
+      if (response.data.status === 'success') {
+        setDeletingUser(null)
+        loadUsers()
+      }
+    } catch (err) {
+      console.error('Error deleting user:', err)
+      setError(err.response?.data?.detail || 'Failed to delete user')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleChangeRole = async (username, newRole) => {
+    setError(null)
+    setCreating(true)
+
+    try {
+      const formData = new FormData()
+      formData.append('role', newRole)
+
+      const response = await api.patch(`/auth/users/${username}/role`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      })
+
+      if (response.data.status === 'success') {
+        loadUsers()
+      }
+    } catch (err) {
+      console.error('Error changing role:', err)
+      setError(err.response?.data?.detail || 'Failed to change user role')
     } finally {
       setCreating(false)
     }
@@ -192,7 +291,7 @@ export default function UsersPage() {
           {users.map((user) => (
             <div key={user.username} className="user-card">
               <div className="user-avatar">
-                <User size={24} />
+                {user.role === 'admin' ? <Shield size={24} /> : <User size={24} />}
               </div>
               <div className="user-info">
                 <div className="user-name">{user.username}</div>
@@ -203,19 +302,131 @@ export default function UsersPage() {
                       {user.email}
                     </span>
                   )}
-                  <span className={`user-role ${user.role}`}>
-                    {user.role === 'admin' ? <Shield size={14} /> : <User size={14} />}
-                    {user.role}
-                  </span>
+                  <div className="user-role-container">
+                    <span className={`user-role ${user.role}`}>
+                      {user.role === 'admin' ? <Shield size={14} /> : <User size={14} />}
+                      {user.role}
+                    </span>
+                    {user.role === 'user' && (
+                      <button
+                        onClick={() => handleChangeRole(user.username, 'admin')}
+                        className="btn-change-role"
+                        title="Promote to Admin"
+                      >
+                        <KeyRound size={14} />
+                      </button>
+                    )}
+                    {user.role === 'admin' && (
+                      <button
+                        onClick={() => handleChangeRole(user.username, 'user')}
+                        className="btn-change-role"
+                        title="Demote to User"
+                        disabled={users.filter(u => u.role === 'admin').length <= 1}
+                      >
+                        <User size={14} />
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {user.created_at && (
                   <div className="user-created">
                     Created: {new Date(user.created_at).toLocaleDateString()}
                   </div>
                 )}
+                <div className="user-actions">
+                  <button
+                    onClick={() => handleEditUser(user)}
+                    className="btn-edit"
+                    title="Edit User"
+                  >
+                    <Edit size={16} />
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => handleDeleteUser(user)}
+                    className="btn-delete"
+                    title="Delete User"
+                    disabled={user.role === 'admin' && users.filter(u => u.role === 'admin').length <= 1}
+                  >
+                    <Trash2 size={16} />
+                    Delete
+                  </button>
+                </div>
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {editingUser && (
+        <div className="modal-overlay" onClick={() => setEditingUser(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h2>Edit User: {editingUser.username}</h2>
+            <form onSubmit={handleUpdateUser} className="create-user-form">
+              <div className="form-group">
+                <label htmlFor="edit-email">Email</label>
+                <input
+                  id="edit-email"
+                  type="email"
+                  value={editUser.email}
+                  onChange={(e) => setEditUser({ ...editUser, email: e.target.value })}
+                  placeholder="user@example.com"
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="edit-password">New Password (leave empty to keep current)</label>
+                <input
+                  id="edit-password"
+                  type="password"
+                  value={editUser.password}
+                  onChange={(e) => setEditUser({ ...editUser, password: e.target.value })}
+                  placeholder="Enter new password"
+                  minLength={6}
+                />
+              </div>
+              <div className="form-actions">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingUser(null)
+                    setEditUser({ email: '', password: '' })
+                  }}
+                  className="btn-cancel"
+                >
+                  Cancel
+                </button>
+                <button type="submit" disabled={creating} className="btn-submit">
+                  {creating ? 'Updating...' : 'Update User'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {deletingUser && (
+        <div className="modal-overlay" onClick={() => setDeletingUser(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h2>Delete User</h2>
+            <p>Are you sure you want to delete user <strong>{deletingUser.username}</strong>?</p>
+            <p className="warning-text">This action cannot be undone.</p>
+            <div className="form-actions">
+              <button
+                type="button"
+                onClick={() => setDeletingUser(null)}
+                className="btn-cancel"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteUser}
+                disabled={creating}
+                className="btn-delete-confirm"
+              >
+                {creating ? 'Deleting...' : 'Delete User'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

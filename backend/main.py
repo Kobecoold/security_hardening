@@ -1133,6 +1133,60 @@ async def create_user_by_admin(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.put("/auth/users/{username}", dependencies=[RequireAdmin])
+async def update_user(
+    username: str,
+    email: Optional[str] = Form(None),
+    password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+):
+    """Cập nhật thông tin user (email, password). Admin only."""
+    try:
+        user = user_manager.update_user(username, email=email, password=password)
+        return {
+            "status": "success",
+            "message": "User updated successfully",
+            "user": user
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/auth/users/{username}", dependencies=[RequireAdmin])
+async def delete_user(username: str):
+    """Xóa user (soft delete). Admin only."""
+    try:
+        user_manager.delete_user(username)
+        return {
+            "status": "success",
+            "message": "User deleted successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.patch("/auth/users/{username}/role", dependencies=[RequireAdmin])
+async def change_user_role(
+    username: str,
+    role: str = Form(...),
+):
+    """Thay đổi role của user. Admin only. Không cho phép tạo thêm admin."""
+    try:
+        if role not in ["admin", "user"]:
+            raise HTTPException(status_code=400, detail="Invalid role. Must be 'admin' or 'user'")
+        
+        user = user_manager.change_role(username, role)
+        return {
+            "status": "success",
+            "message": "User role updated successfully",
+            "user": user
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/auth/users/login")
 async def login_user(
     username: str = Form(...),
