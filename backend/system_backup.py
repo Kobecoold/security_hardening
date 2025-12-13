@@ -273,8 +273,8 @@ class SystemBackupManager:
                             'net localgroup Administrators',
                             'secedit /export /cfg C:\\temp\\secpol.txt',
                         ]
-                    security_data = {}
-                    for cmd in secpol_commands:
+                        security_data = {}
+                        for cmd in secpol_commands:
                         try:
                             if 'secedit' in cmd:
                                 result = session.run_cmd(cmd)
@@ -290,9 +290,9 @@ class SystemBackupManager:
                                 if result.status_code == 0:
                                     cmd_name = cmd.replace(' ', '_').replace('/', '_')
                                     security_data[cmd_name] = result.std_out.decode()[:10000]
-                        except Exception as e:
-                            print(f"   ⚠️ Failed to run {cmd}: {e}")
-                    
+                            except Exception as e:
+                                print(f"   ⚠️ Failed to run {cmd}: {e}")
+                        
                         if security_data:
                             backup_data["data"]["security_policy"] = security_data
                             print("   ✓ Security policies backed up")
