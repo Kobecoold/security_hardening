@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
-import { Wrench, RefreshCw, AlertCircle, CheckCircle, XCircle, Plus, RotateCcw } from 'lucide-react'
+import { Wrench, RefreshCw, AlertCircle, CheckCircle, XCircle, Plus, RotateCcw, Trash2, Settings } from 'lucide-react'
 import './Remediations.css'
 
 export default function Remediations() {
@@ -11,6 +11,9 @@ export default function Remediations() {
   const [remediations, setRemediations] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [selectedIds, setSelectedIds] = useState(new Set())
+  const [showClearDataModal, setShowClearDataModal] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     console.log('Remediations page - userRole:', userRole, 'isAdmin:', userRole === 'admin', 'type:', typeof userRole)
@@ -36,6 +39,76 @@ export default function Remediations() {
       return <CheckCircle size={16} className="icon-success" />
     }
     return <XCircle size={16} className="icon-partial" />
+  }
+
+  const handleSelectAll = () => {
+    if (selectedIds.size === remediations.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(remediations.map(r => r.remediation_id || r._id || r.id)))
+    }
+  }
+
+  const handleToggleSelect = (id) => {
+    const newSelected = new Set(selectedIds)
+    if (newSelected.has(id)) {
+      newSelected.delete(id)
+    } else {
+      newSelected.add(id)
+    }
+    setSelectedIds(newSelected)
+  }
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return
+    
+    const confirmMessage = `Are you sure you want to delete ${selectedIds.size} remediation(s)? This action cannot be undone.`
+    if (!window.confirm(confirmMessage)) return
+
+    try {
+      setDeleting(true)
+      const idsArray = Array.from(selectedIds)
+      await api.post('/remediations/bulk-delete', { ids: idsArray })
+      alert(`Successfully deleted ${idsArray.length} remediation(s)`)
+      setSelectedIds(new Set())
+      loadRemediations()
+    } catch (err) {
+      console.error('Error deleting remediations:', err)
+      alert(err.response?.data?.detail || 'Failed to delete remediations')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const handleClearData = async () => {
+    const confirmMessage = `⚠️ WARNING: This will delete ALL data from the database:\n\n` +
+      `- All audit reports\n` +
+      `- All remediation logs\n` +
+      `- All backups (rule backups and system backups)\n` +
+      `- All backup schedules\n\n` +
+      `Users and API keys will be preserved.\n\n` +
+      `This action CANNOT be undone. Are you absolutely sure?`
+    
+    if (!window.confirm(confirmMessage)) return
+
+    const doubleConfirm = window.prompt('Type "DELETE ALL" to confirm:')
+    if (doubleConfirm !== 'DELETE ALL') {
+      alert('Clear data cancelled')
+      return
+    }
+
+    try {
+      setDeleting(true)
+      await api.post('/database/clear-data')
+      alert('All data has been cleared successfully')
+      setShowClearDataModal(false)
+      loadRemediations()
+    } catch (err) {
+      console.error('Error clearing data:', err)
+      alert(err.response?.data?.detail || 'Failed to clear data')
+    } finally {
+      setDeleting(false)
+    }
   }
 
   if (loading) {
@@ -65,9 +138,22 @@ export default function Remediations() {
                   <Plus size={18} />
                   New Remediation
                 </button>
-                <button onClick={() => navigate('/rollback')} className="btn-rollback">
-                  <RotateCcw size={18} />
-                  Rollback
+                {selectedIds.size > 0 && (
+                  <button 
+                    onClick={handleBulkDelete} 
+                    className="btn-delete-selected"
+                    disabled={deleting}
+                  >
+                    <Trash2 size={18} />
+                    Delete Selected ({selectedIds.size})
+                  </button>
+                )}
+                <button 
+                  onClick={() => setShowClearDataModal(true)} 
+                  className="btn-clear-data"
+                >
+                  <Settings size={18} />
+                  Clear Data
                 </button>
               </>
             )
@@ -93,9 +179,36 @@ export default function Remediations() {
           <p>Remediation actions will appear here</p>
         </div>
       ) : (
-        <div className="remediations-container">
-          {remediations.map((remediation) => (
-            <div key={remediation.id} className="remediation-card">
+        <>
+          <div className="bulk-actions">
+            <label className="select-all-checkbox">
+              <input
+                type="checkbox"
+                checked={selectedIds.size === remediations.length && remediations.length > 0}
+                onChange={handleSelectAll}
+              />
+              <span>Select All</span>
+            </label>
+            {selectedIds.size > 0 && (
+              <span className="selected-count">
+                {selectedIds.size} selected
+              </span>
+            )}
+          </div>
+          <div className="remediations-container">
+            {remediations.map((remediation) => {
+              const remediationId = remediation.remediation_id || remediation._id || remediation.id
+              return (
+              <div key={remediationId} className="remediation-card">
+                {userRole && String(userRole).trim().toLowerCase() === 'admin' && (
+                  <div className="remediation-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(remediationId)}
+                      onChange={() => handleToggleSelect(remediationId)}
+                    />
+                  </div>
+                )}
               <div className="remediation-header">
                 <div className="remediation-title">
                   {getStatusIcon(remediation.status)}
@@ -219,7 +332,45 @@ export default function Remediations() {
                 </div>
               )}
             </div>
-          ))}
+            )
+            })}
+          </div>
+        </>
+      )}
+
+      {/* Clear Data Modal */}
+      {showClearDataModal && (
+        <div className="modal-overlay" onClick={() => setShowClearDataModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h2>Clear All Data</h2>
+            <div className="clear-data-warning">
+              <AlertCircle size={24} />
+              <p><strong>Warning:</strong> This will permanently delete:</p>
+              <ul>
+                <li>All audit reports</li>
+                <li>All remediation logs</li>
+                <li>All backups (rule backups and system backups)</li>
+                <li>All backup schedules</li>
+              </ul>
+              <p><strong>Users and API keys will be preserved.</strong></p>
+            </div>
+            <div className="modal-actions">
+              <button 
+                type="button" 
+                onClick={() => setShowClearDataModal(false)} 
+                className="btn-secondary"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleClearData} 
+                disabled={deleting}
+                className="btn-danger"
+              >
+                {deleting ? 'Clearing...' : 'Clear All Data'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -243,6 +243,50 @@ class AuditDB:
         except Exception as e:
             print(f"❌ Failed to update schedule: {e}")
             raise
+    
+    def bulk_delete_remediations(self, remediation_ids: List[str]) -> int:
+        """Xóa nhiều remediation logs theo danh sách IDs."""
+        try:
+            # Try to find by remediation_id first, then _id
+            result = self.remediations.delete_many({
+                "$or": [
+                    {"remediation_id": {"$in": remediation_ids}},
+                    {"_id": {"$in": remediation_ids}}
+                ]
+            })
+            deleted_count = result.deleted_count
+            print(f"✅ Deleted {deleted_count} remediation(s)")
+            return deleted_count
+        except Exception as e:
+            print(f"❌ Failed to bulk delete remediations: {e}")
+            raise
+    
+    def clear_all_data(self) -> Dict:
+        """Xóa tất cả dữ liệu audit, remediation, backup, schedules. Giữ lại users và api_keys."""
+        try:
+            deleted_counts = {}
+            
+            # Delete audit reports
+            audit_result = self.audits.delete_many({})
+            deleted_counts["audit_reports"] = audit_result.deleted_count
+            
+            # Delete remediation logs
+            remediation_result = self.remediations.delete_many({})
+            deleted_counts["remediation_logs"] = remediation_result.deleted_count
+            
+            # Delete backups (both rule backups and system backups)
+            backup_result = self.backups.delete_many({})
+            deleted_counts["backups"] = backup_result.deleted_count
+            
+            # Delete backup schedules
+            schedule_result = self.backup_schedules.delete_many({})
+            deleted_counts["backup_schedules"] = schedule_result.deleted_count
+            
+            print(f"✅ Cleared all data: {deleted_counts}")
+            return deleted_counts
+        except Exception as e:
+            print(f"❌ Failed to clear data: {e}")
+            raise
 
 # Kết nối đến MongoDB Docker container
 db = AuditDB()

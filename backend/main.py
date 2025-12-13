@@ -1358,6 +1358,37 @@ async def get_remediation_reports(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/remediations/bulk-delete", dependencies=[RequireAdmin])
+async def bulk_delete_remediations(ids: List[str]):
+    """Xóa nhiều remediation logs theo danh sách IDs."""
+    try:
+        if not ids or len(ids) == 0:
+            raise HTTPException(status_code=400, detail="No IDs provided")
+        
+        deleted_count = db.bulk_delete_remediations(ids)
+        return {
+            "status": "success",
+            "message": f"Deleted {deleted_count} remediation(s)",
+            "deleted_count": deleted_count
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/database/clear-data", dependencies=[RequireAdmin])
+async def clear_all_data():
+    """Xóa tất cả dữ liệu audit, remediation, backup, schedules. Giữ lại users và api_keys."""
+    try:
+        deleted_counts = db.clear_all_data()
+        return {
+            "status": "success",
+            "message": "All data cleared successfully",
+            "deleted_counts": deleted_counts
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/reports/hosts", dependencies=[RequireAuth])
 async def get_hosts_overview():
     """
