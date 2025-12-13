@@ -7,6 +7,7 @@ from typing import List, Dict, Optional
 from database import db
 from rollback import rollback_manager
 from linux_rollback import linux_rollback_manager
+from system_backup import system_backup_manager
 
 import time
 import traceback
@@ -808,6 +809,80 @@ async def cleanup_old_backups(days: int = 7):
     except Exception as e:
         print(f"❌ Failed to cleanup old backups: {e}")
         traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/backups/system/linux", dependencies=[RequireAdmin])
+async def create_system_backup_linux(
+    Host: str = Form(...),
+    Username: str = Form(""),
+    Key_path: Optional[str] = Form("~/.ssh/id_ed25519"),
+    Password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+    Sudo_password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+):
+    """Create independent system backup for Linux - backup important system files."""
+    try:
+        backup_id = system_backup_manager.create_linux_system_backup(
+            Host, Username, Key_path or "", Password, Sudo_password
+        )
+        if backup_id:
+            return {
+                "status": "success",
+                "message": f"System backup created successfully for {Host}",
+                "backup_id": backup_id,
+                "host": Host
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to create system backup")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ System backup failed: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/backups/system/windows", dependencies=[RequireAdmin])
+async def create_system_backup_windows(
+    host: str = Form(...),
+    username: str = Form("Administrator"),
+    password: str = Form(..., json_schema_extra={"format": "password"}),
+):
+    """Create independent system backup for Windows - backup important system configurations."""
+    try:
+        backup_id = system_backup_manager.create_windows_system_backup(
+            host, username, password
+        )
+        if backup_id:
+            return {
+                "status": "success",
+                "message": f"System backup created successfully for {host}",
+                "backup_id": backup_id,
+                "host": host
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to create system backup")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ System backup failed: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/backups/system", dependencies=[RequireAuth])
+async def get_system_backups(host: Optional[str] = None, os_type: Optional[str] = None):
+    """Get system backups (not rule backups)."""
+    try:
+        query = {"type": "system_backup"}
+        if host:
+            query["host"] = host
+        if os_type:
+            query["os_type"] = os_type
+        
+        backups = list(db.backups.find(query).sort("timestamp", -1).limit(50))
+        for backup in backups:
+            backup["_id"] = str(backup["_id"])
+        
+        return {"total": len(backups), "backups": backups}
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/remediate/linux", dependencies=[RequireAdmin])

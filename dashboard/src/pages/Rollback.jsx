@@ -232,19 +232,21 @@ export default function Rollback() {
                   <strong>Selected Backup:</strong>
                   <code>{selectedBackup || 'Not selected'}</code>
                 </div>
-                <div className="info-note">
-                  <strong>⚠️ Lưu ý về Rollback:</strong>
-                  <ul>
-                    <li>Backup này được tạo <strong>TRƯỚC</strong> khi remediation chạy</li>
-                    <li>Rollback sẽ khôi phục hệ thống về trạng thái <strong>TRƯỚC remediation</strong></li>
-                    {remediationInfo?.ruleId && (
-                      <>
-                        <li>Rule <code>{remediationInfo.ruleId}</code> sẽ quay về trạng thái <strong className="status-fail">FAIL</strong></li>
-                        <li>Điều này có nghĩa là rule sẽ <strong>không còn được fix</strong> sau khi rollback</li>
-                      </>
-                    )}
-                  </ul>
-                </div>
+                {remediationInfo?.backupType === 'rules' && (
+                  <div className="info-note">
+                    <strong>⚠️ Rule Backup Rollback:</strong>
+                    <ul>
+                      <li>This backup was created <strong>BEFORE</strong> remediation ran</li>
+                      <li>Rollback will restore the system to the state <strong>BEFORE remediation</strong> was applied</li>
+                      {remediationInfo?.ruleId && (
+                        <>
+                          <li>Rule <code>{remediationInfo.ruleId}</code> will return to its previous state</li>
+                          <li>All changes made by this remediation will be reverted</li>
+                        </>
+                      )}
+                    </ul>
+                  </div>
+                )}
               </div>
             </div>
           )}
