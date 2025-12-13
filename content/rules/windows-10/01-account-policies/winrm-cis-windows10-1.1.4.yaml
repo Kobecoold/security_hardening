@@ -8,8 +8,6 @@ needs_sudo: false
 check:
   winrm: net accounts | findstr "Minimum password length"
   expected: "Minimum password length"
-remediation:
-  winrm: net accounts /minpwlen:14
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
 controls:

@@ -8,8 +8,6 @@ needs_sudo: false
 check:
   winrm: reg query "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System\\Audit" /v ProcessCreationIncludeCmdLine_Enabled
   expected: "0x1"
-remediation:
-  winrm: reg add "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System\\Audit" /v ProcessCreationIncludeCmdLine_Enabled /t REG_DWORD /d 1 /f
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
 controls:

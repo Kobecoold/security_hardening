@@ -8,8 +8,6 @@ needs_sudo: false
 check:
   winrm: net accounts | findstr "Maximum password age"
   expected: "Maximum password age"
-remediation:
-  winrm: net accounts /maxpwage:365
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
 controls:

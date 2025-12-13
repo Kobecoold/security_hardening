@@ -8,8 +8,6 @@ description: Enforce password history of 24 passwords
 check:
   winrm: net accounts | findstr "Password history"
   expected: "Password history"
-remediation:
-  winrm: net accounts /uniquepw:24
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
 controls:

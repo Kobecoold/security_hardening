@@ -8,8 +8,6 @@ needs_sudo: false
 check:
   winrm: auditpol /get /subcategory:"Credential Validation" | findstr "Success and Failure"
   expected: "Success and Failure"
-remediation:
-  winrm: auditpol /set /subcategory:"Credential Validation" /success:enable /failure:enable
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
 controls:

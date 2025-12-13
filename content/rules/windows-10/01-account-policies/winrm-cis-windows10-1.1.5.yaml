@@ -8,8 +8,6 @@ needs_sudo: false
 check:
   winrm: net accounts | findstr "Password complexity"
   expected: "Password complexity"
-remediation:
-  winrm: secedit /export /cfg %TEMP%\\secpol.cfg && (findstr /v "PasswordComplexity" %TEMP%\\secpol.cfg > %TEMP%\\secpol_new.cfg) && echo PasswordComplexity=1 >> %TEMP%\\secpol_new.cfg && secedit /configure /db %TEMP%\\secedit.sdb /cfg %TEMP%\\secpol_new.cfg /areas SECURITYPOLICY
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
 controls:

@@ -8,8 +8,6 @@ needs_sudo: false
 check:
   winrm: reg query "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa" /v TurnOffAnonymousBlock
   expected: "0x0"
-remediation:
-  winrm: reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa" /v TurnOffAnonymousBlock /t REG_DWORD /d 0 /f
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
 controls:

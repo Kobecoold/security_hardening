@@ -8,8 +8,6 @@ needs_sudo: false
 check:
   winrm: netsh advfirewall show domainprofile state | findstr "ON"
   expected: "ON"
-remediation:
-  winrm: netsh advfirewall set domainprofile state on
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
 controls:

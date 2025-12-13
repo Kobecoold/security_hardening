@@ -8,8 +8,6 @@ needs_sudo: false
 check:
   winrm: reg query "HKLM\SYSTEM\CurrentControlSet\Control\Lsa" /v LimitBlankPasswordUse | findstr "0x1"
   expected: "0x1"
-remediation:
-  winrm: reg add "HKLM\SYSTEM\CurrentControlSet\Control\Lsa" /v LimitBlankPasswordUse /t REG_DWORD /d 1 /f
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
 controls:

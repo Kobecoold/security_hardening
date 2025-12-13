@@ -8,8 +8,6 @@ needs_sudo: false
 check:
   winrm: net accounts | findstr "Reversible encryption"
   expected: "Reversible encryption"
-remediation:
-  winrm: net accounts /revcipher:no
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
 controls:

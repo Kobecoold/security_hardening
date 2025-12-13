@@ -8,8 +8,6 @@ needs_sudo: false
 check:
   winrm: auditpol /get /subcategory:"Logon" | findstr "Success and Failure"
   expected: "Success and Failure"
-remediation:
-  winrm: auditpol /set /subcategory:"Logon" /success:enable /failure:enable
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
 controls:

@@ -8,8 +8,6 @@ needs_sudo: false
 check:
   winrm: net user guest | findstr "Account active"
   expected: "Account active.*No"
-remediation:
-  winrm: net user guest /active:no
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
 controls:

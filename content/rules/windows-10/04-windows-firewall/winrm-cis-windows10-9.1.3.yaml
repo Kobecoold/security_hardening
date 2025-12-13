@@ -8,8 +8,6 @@ needs_sudo: false
 check:
   winrm: netsh advfirewall show domainprofile settings | findstr "Inbound user notification"
   expected: "Disable"
-remediation:
-  winrm: netsh advfirewall set domainprofile settings inboundusernotification disable
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
 controls:
