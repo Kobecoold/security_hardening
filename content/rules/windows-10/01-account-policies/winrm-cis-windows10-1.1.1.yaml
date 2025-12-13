@@ -1,6 +1,7 @@
-id: winrm-cis-windows10-1.2.3
+id: winrm-cis-windows10-1.1.1
 os: windows-10
-title: Configure Password History
+title: Ensure 'Enforce password history' is set to '24 or more passwords' 
+description: Enforce password history of 24 passwords 
 benchmark: CIS Windows 10
 level: 1
 description: Enforce password history of 24 passwords

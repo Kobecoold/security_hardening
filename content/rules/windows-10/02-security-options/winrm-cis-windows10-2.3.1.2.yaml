@@ -1,0 +1,16 @@
+id: winrm-cis-windows10-2.3.1.2
+os: windows-10
+title: Ensure 'Accounts Guest account status' is set to 'Disabled'
+benchmark: CIS Microsoft Windows 10 Enterprise Benchmark v4.0.0
+level: 1
+description: Vô hiệu hóa tài khoản Guest.
+needs_sudo: false
+check:
+  winrm: net user guest | findstr "Account active"
+  expected: "Account active.*No"
+remediation:
+  winrm: net user guest /active:no
+references:
+  - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
+controls:
+  - CIS 2.3.1.2

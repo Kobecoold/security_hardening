@@ -1,0 +1,16 @@
+id: winrm-cis-windows10-17.5.4
+os: windows-10
+title: Ensure 'Audit Logon' is set to 'Success and Failure'
+benchmark: CIS Microsoft Windows 10 Enterprise Benchmark v4.0.0
+level: 1
+description: Ghi lại cả thành công và thất bại đăng nhập.
+needs_sudo: false
+check:
+  winrm: auditpol /get /subcategory:"Logon" | findstr "Success and Failure"
+  expected: "Success and Failure"
+remediation:
+  winrm: auditpol /set /subcategory:"Logon" /success:enable /failure:enable
+references:
+  - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
+controls:
+  - CIS 17.5.4

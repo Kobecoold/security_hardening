@@ -1,0 +1,16 @@
+id: winrm-cis-windows10-2.3.7.1
+os: windows-10
+title: Ensure 'Interactive logon Do not require CTRL+ALT+DEL' is set to 'Disabled'
+benchmark: CIS Microsoft Windows 10 Enterprise Benchmark v4.0.0
+level: 1
+description: Yêu cầu nhấn CTRL+ALT+DEL trước khi đăng nhập.
+needs_sudo: false
+check:
+  winrm: reg query "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v DisableCAD
+  expected: "0x0"
+remediation:
+  winrm: reg add "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v DisableCAD /t REG_DWORD /d 0 /f
+references:
+  - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
+controls:
+  - CIS 2.3.7.1

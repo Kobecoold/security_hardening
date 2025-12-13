@@ -1,0 +1,16 @@
+id: winrm-cis-windows10-9.1.2
+os: windows-10
+title: Ensure 'Windows Firewall Domain Inbound connections' is set to 'Block (default)'
+benchmark: CIS Microsoft Windows 10 Enterprise Benchmark v4.0.0
+level: 1
+description: Chặn kết nối inbound trừ khi có rule cho phép.
+needs_sudo: false
+check:
+  winrm: netsh advfirewall show domainprofile firewallpolicy | findstr "BlockInbound"
+  expected: "BlockInbound"
+remediation:
+  winrm: netsh advfirewall set domainprofile firewallpolicy blockinbound,allowoutbound
+references:
+  - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
+controls:
+  - CIS 9.1.2

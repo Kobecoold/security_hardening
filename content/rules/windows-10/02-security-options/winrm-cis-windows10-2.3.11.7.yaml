@@ -1,0 +1,16 @@
+id: winrm-cis-windows10-2.3.11.7
+os: windows-10
+title: Ensure 'Network security LAN Manager authentication level' is set to 'Send NTLMv2 response only. Refuse LM & NTLM'
+benchmark: CIS Microsoft Windows 10 Enterprise Benchmark v4.0.0
+level: 1
+description: Chỉ cho phép xác thực NTLMv2, từ chối LM và NTLM.
+needs_sudo: false
+check:
+  winrm: reg query "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa" /v LmCompatibilityLevel
+  expected: "0x5"
+remediation:
+  winrm: reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa" /v LmCompatibilityLevel /t REG_DWORD /d 5 /f
+references:
+  - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
+controls:
+  - CIS 2.3.11.7

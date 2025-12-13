@@ -1,0 +1,16 @@
+id: winrm-cis-windows10-9.1.3
+os: windows-10
+title: Ensure 'Windows Firewall Domain Settings Display a notification' is set to 'No'
+benchmark: CIS Microsoft Windows 10 Enterprise Benchmark v4.0.0
+level: 1
+description: Tắt thông báo khi kết nối bị chặn.
+needs_sudo: false
+check:
+  winrm: netsh advfirewall show domainprofile settings | findstr "Inbound user notification"
+  expected: "Disable"
+remediation:
+  winrm: netsh advfirewall set domainprofile settings inboundusernotification disable
+references:
+  - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
+controls:
+  - CIS 9.1.3

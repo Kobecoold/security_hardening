@@ -1,0 +1,16 @@
+id: winrm-cis-windows10-2.3.2.1
+os: windows-10
+title: Ensure 'Audit Force audit policy subcategory settings to override audit policy category settings' is set to 'Enabled'
+benchmark: CIS Microsoft Windows 10 Enterprise Benchmark v4.0.0
+level: 1
+description: Cho phép cài đặt audit theo subcategory ghi đè lên category.
+needs_sudo: false
+check:
+  winrm: reg query "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa" /v SCENoApplyLegacyAuditPolicy
+  expected: "0x1"
+remediation:
+  winrm: reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa" /v SCENoApplyLegacyAuditPolicy /t REG_DWORD /d 1 /f
+references:
+  - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
+controls:
+  - CIS 2.3.2.1

@@ -1,0 +1,16 @@
+id: winrm-cis-windows10-1.1.4
+os: windows-10
+title: Ensure 'Minimum password length' is set to '14 or more character(s)'
+benchmark: CIS Microsoft Windows 10 Enterprise Benchmark v4.0.0
+level: 1
+description: Xác định độ dài tối thiểu của mật khẩu.
+needs_sudo: false
+check:
+  winrm: net accounts | findstr "Minimum password length"
+  expected: "Minimum password length"
+remediation:
+  winrm: net accounts /minpwlen:14
+references:
+  - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
+controls:
+  - CIS 1.1.4

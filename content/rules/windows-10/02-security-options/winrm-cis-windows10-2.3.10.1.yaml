@@ -1,0 +1,16 @@
+id: winrm-cis-windows10-2.3.10.1
+os: windows-10
+title: Ensure 'Network access Allow anonymous SID/Name translation' is set to 'Disabled'
+benchmark: CIS Microsoft Windows 10 Enterprise Benchmark v4.0.0
+level: 1
+description: Ngăn người dùng ẩn danh chuyển đổi SID thành tên và ngược lại.
+needs_sudo: false
+check:
+  winrm: reg query "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa" /v TurnOffAnonymousBlock
+  expected: "0x0"
+remediation:
+  winrm: reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa" /v TurnOffAnonymousBlock /t REG_DWORD /d 0 /f
+references:
+  - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
+controls:
+  - CIS 2.3.10.1

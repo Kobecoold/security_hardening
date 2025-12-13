@@ -1,0 +1,16 @@
+id: winrm-cis-windows10-2.3.1.3
+os: windows-10
+title: Ensure 'Accounts Limit local account use of blank passwords to console logon only' is set to 'Enabled'
+benchmark: CIS Microsoft Windows 10 Enterprise Benchmark v4.0.0
+level: 1
+description: Chỉ cho phép đăng nhập bằng mật khẩu trống tại console, không qua mạng.
+needs_sudo: false
+check:
+  winrm: reg query "HKLM\SYSTEM\CurrentControlSet\Control\Lsa" /v LimitBlankPasswordUse | findstr "0x1"
+  expected: "0x1"
+remediation:
+  winrm: reg add "HKLM\SYSTEM\CurrentControlSet\Control\Lsa" /v LimitBlankPasswordUse /t REG_DWORD /d 1 /f
+references:
+  - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
+controls:
+  - CIS 2.3.1.3

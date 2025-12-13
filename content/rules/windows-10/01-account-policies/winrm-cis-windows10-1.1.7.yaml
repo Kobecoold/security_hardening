@@ -1,0 +1,16 @@
+id: winrm-cis-windows10-1.1.7
+os: windows-10
+title: Ensure 'Store passwords using reversible encryption' is set to 'Disabled'
+benchmark: CIS Microsoft Windows 10 Enterprise Benchmark v4.0.0
+level: 1
+description: Ngăn hệ điều hành lưu mật khẩu dưới dạng mã hóa thuận nghịch (tương đương plaintext).
+needs_sudo: false
+check:
+  winrm: net accounts | findstr "Reversible encryption"
+  expected: "Reversible encryption"
+remediation:
+  winrm: net accounts /revcipher:no
+references:
+  - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
+controls:
+  - CIS 1.1.7
