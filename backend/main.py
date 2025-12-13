@@ -670,7 +670,7 @@ async def remediate_windows(
         if create_backup:
             try:
                 print("🔍 Creating backup...")
-                backup_id = rollback_manager.create_backup(host, session)
+                backup_id = rollback_manager.create_backup(host, session, rule_id=None)  # Windows remediation không có rule_id cụ thể
                 if backup_id:
                     print(f"✅ Backup created: {backup_id}")
                 else:
@@ -1127,7 +1127,7 @@ async def remediate_linux(
             try:
                 print("🔍 Creating backup...")
                 backup_id = linux_rollback_manager.create_backup(
-                    Host, Username, Key_path or "", Password, Sudo_password
+                    Host, Username, Key_path or "", Password, Sudo_password, rule_id=Rule_id
                 )
                 if backup_id:
                     print(f"✅ Backup created: {backup_id}")
