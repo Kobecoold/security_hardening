@@ -15,8 +15,12 @@ class UserManager:
     
     def create_user(self, username: str, password: str, email: str = "", role: str = "user") -> Dict:
         """Tạo user mới."""
-        # Check if user exists
-        if self.users_collection.find_one({"username": username}):
+        # Check if active user with this username exists
+        existing_user = self.users_collection.find_one({
+            "username": username,
+            "$or": [{"is_active": True}, {"is_active": {"$exists": False}}]
+        })
+        if existing_user:
             raise HTTPException(status_code=400, detail="Username already exists")
         
         # Hash password
