@@ -62,11 +62,15 @@ class UserManager:
         return True
     
     def get_user(self, username: str) -> Optional[Dict]:
-        """Lấy thông tin user."""
-        user = self.users_collection.find_one({"username": username})
+        """Lấy thông tin user (chỉ active users)."""
+        user = self.users_collection.find_one({
+            "username": username,
+            "$or": [{"is_active": True}, {"is_active": {"$exists": False}}]
+        })
         if user:
             user["_id"] = str(user["_id"])
-            del user["password_hash"]
+            if "password_hash" in user:
+                del user["password_hash"]
             if user.get("created_at"):
                 user["created_at"] = user["created_at"].isoformat()
             if user.get("last_login"):
@@ -74,8 +78,10 @@ class UserManager:
         return user
     
     def has_any_users(self) -> bool:
-        """Kiểm tra xem có user nào không."""
-        count = self.users_collection.count_documents({})
+        """Kiểm tra xem có user nào không (chỉ active users)."""
+        count = self.users_collection.count_documents({
+            "$or": [{"is_active": True}, {"is_active": {"$exists": False}}]
+        })
         return count > 0
     
     def get_user_by_api_key_name(self, api_key_name: str) -> Optional[Dict]:
@@ -86,8 +92,12 @@ class UserManager:
         return self.get_user(username)
     
     def list_users(self) -> list:
-        """Lấy danh sách tất cả users."""
-        users = list(self.users_collection.find({}, {"password_hash": 0}).sort("created_at", -1))
+        """Lấy danh sách tất cả users (chỉ active users)."""
+        # Chỉ lấy users có is_active = True hoặc không có field is_active (backward compatibility)
+        users = list(self.users_collection.find(
+            {"$or": [{"is_active": True}, {"is_active": {"$exists": False}}]},
+            {"password_hash": 0}
+        ).sort("created_at", -1))
         for user in users:
             user["_id"] = str(user["_id"])
             if user.get("created_at"):
@@ -98,6 +108,7 @@ class UserManager:
     
     def update_user(self, username: str, email: Optional[str] = None, password: Optional[str] = None) -> Dict:
         """Cập nhật thông tin user."""
+        # Tìm user (có thể là inactive, vì admin có thể muốn update)
         user = self.users_collection.find_one({"username": username})
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
@@ -105,7 +116,8 @@ class UserManager:
         update_data = {}
         if email is not None:
             update_data["email"] = email
-        if password is not None:
+        if password is not None and password.strip():
+            # Hash password giống như khi tạo user mới
             update_data["password_hash"] = hashlib.sha256(password.encode()).hexdigest()
         
         if not update_data:
@@ -116,7 +128,17 @@ class UserManager:
             {"$set": update_data}
         )
         
-        return self.get_user(username)
+        # Trả về user đã update (có thể là inactive)
+        updated_user = self.users_collection.find_one({"username": username})
+        if updated_user:
+            updated_user["_id"] = str(updated_user["_id"])
+            if "password_hash" in updated_user:
+                del updated_user["password_hash"]
+            if updated_user.get("created_at"):
+                updated_user["created_at"] = updated_user["created_at"].isoformat()
+            if updated_user.get("last_login"):
+                updated_user["last_login"] = updated_user["last_login"].isoformat()
+        return updated_user
     
     def delete_user(self, username: str) -> bool:
         """Xóa user (soft delete - set is_active = False)."""

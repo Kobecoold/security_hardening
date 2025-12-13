@@ -23,7 +23,8 @@ export default function UsersPage() {
 
   const [editUser, setEditUser] = useState({
     email: '',
-    password: ''
+    password: '',
+    confirmPassword: ''
   })
 
   useEffect(() => {
@@ -79,7 +80,8 @@ export default function UsersPage() {
     setEditingUser(user)
     setEditUser({
       email: user.email || '',
-      password: ''
+      password: '',
+      confirmPassword: ''
     })
     setError(null)
   }
@@ -87,6 +89,19 @@ export default function UsersPage() {
   const handleUpdateUser = async (e) => {
     e.preventDefault()
     setError(null)
+
+    // Validate password if provided
+    if (editUser.password) {
+      if (editUser.password.length < 6) {
+        setError('Password must be at least 6 characters long')
+        return
+      }
+      if (editUser.password !== editUser.confirmPassword) {
+        setError('Passwords do not match')
+        return
+      }
+    }
+
     setCreating(true)
 
     try {
@@ -98,6 +113,13 @@ export default function UsersPage() {
         formData.append('password', editUser.password)
       }
 
+      // Check if there's anything to update
+      if (!formData.has('email') && !formData.has('password')) {
+        setError('No changes to update')
+        setCreating(false)
+        return
+      }
+
       const response = await api.put(`/auth/users/${editingUser.username}`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
@@ -106,7 +128,7 @@ export default function UsersPage() {
 
       if (response.data.status === 'success') {
         setEditingUser(null)
-        setEditUser({ email: '', password: '' })
+        setEditUser({ email: '', password: '', confirmPassword: '' })
         loadUsers()
       }
     } catch (err) {
@@ -384,12 +406,26 @@ export default function UsersPage() {
                   minLength={6}
                 />
               </div>
+              {editUser.password && (
+                <div className="form-group">
+                  <label htmlFor="edit-confirm-password">Confirm New Password *</label>
+                  <input
+                    id="edit-confirm-password"
+                    type="password"
+                    value={editUser.confirmPassword}
+                    onChange={(e) => setEditUser({ ...editUser, confirmPassword: e.target.value })}
+                    placeholder="Confirm new password"
+                    minLength={6}
+                    required={editUser.password ? true : false}
+                  />
+                </div>
+              )}
               <div className="form-actions">
                 <button
                   type="button"
                   onClick={() => {
                     setEditingUser(null)
-                    setEditUser({ email: '', password: '' })
+                    setEditUser({ email: '', password: '', confirmPassword: '' })
                   }}
                   className="btn-cancel"
                 >
