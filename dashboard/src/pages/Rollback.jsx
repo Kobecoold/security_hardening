@@ -23,6 +23,7 @@ export default function Rollback() {
 
   const [backups, setBackups] = useState([])
   const [selectedBackup, setSelectedBackup] = useState('')
+  const [remediationInfo, setRemediationInfo] = useState(null)
 
   // Connection form
   const [formData, setFormData] = useState({
@@ -31,6 +32,24 @@ export default function Rollback() {
     password: '',
     sudo_password: ''
   })
+
+  // Get state from navigation (when coming from remediation)
+  useEffect(() => {
+    const locationState = window.history.state?.usr || {}
+    if (locationState.host) {
+      setHost(locationState.host)
+    }
+    if (locationState.osType) {
+      setOsType(locationState.osType)
+    }
+    if (locationState.selectedBackup) {
+      setSelectedBackup(locationState.selectedBackup)
+      setRemediationInfo({
+        remediationId: locationState.remediationId,
+        ruleId: locationState.ruleId
+      })
+    }
+  }, [])
 
   useEffect(() => {
     if (host && osType) {
@@ -50,9 +69,21 @@ export default function Rollback() {
       const response = await api.get(endpoint)
       setBackups(response.data.backups || [])
       
-      if (response.data.backups.length > 0 && !selectedBackup) {
-        // Auto-select latest backup
-        setSelectedBackup(response.data.backups[0].backup_id || response.data.backups[0]._id)
+      if (response.data.backups.length > 0) {
+        // If we have a selectedBackup from navigation state, keep it
+        // Otherwise, auto-select latest backup
+        if (!selectedBackup) {
+          setSelectedBackup(response.data.backups[0].backup_id || response.data.backups[0]._id)
+        } else {
+          // Verify the selected backup exists in the list
+          const backupExists = response.data.backups.some(b => 
+            (b.backup_id || b._id) === selectedBackup
+          )
+          if (!backupExists) {
+            // If selected backup not found, select latest
+            setSelectedBackup(response.data.backups[0].backup_id || response.data.backups[0]._id)
+          }
+        }
       }
     } catch (err) {
       console.error('Error loading backups:', err)
@@ -183,9 +214,39 @@ export default function Rollback() {
 
           </div>
 
+          {remediationInfo && (
+            <div className="form-section remediation-info-section">
+              <h2>Remediation Information</h2>
+              <div className="remediation-info-card">
+                <div className="info-row">
+                  <strong>Remediation ID:</strong>
+                  <code>{remediationInfo.remediationId || 'N/A'}</code>
+                </div>
+                {remediationInfo.ruleId && (
+                  <div className="info-row">
+                    <strong>Rule ID:</strong>
+                    <span>{remediationInfo.ruleId}</span>
+                  </div>
+                )}
+                <div className="info-row">
+                  <strong>Selected Backup:</strong>
+                  <code>{selectedBackup || 'Not selected'}</code>
+                </div>
+                <p className="info-note">
+                  This rollback will restore the system to the state before this remediation was applied.
+                </p>
+              </div>
+            </div>
+          )}
+
           {backups.length > 0 && (
             <div className="form-section">
               <h2>Select Backup Version</h2>
+              {remediationInfo && (
+                <p className="section-note">
+                  The backup created for this remediation is automatically selected below.
+                </p>
+              )}
               
               <div className="backups-list">
                 {backups.map((backup) => {
@@ -196,7 +257,7 @@ export default function Rollback() {
                   return (
                     <div
                       key={backupId}
-                      className={`backup-item ${isSelected ? 'selected' : ''}`}
+                      className={`backup-item ${isSelected ? 'selected' : ''} ${remediationInfo && remediationInfo.selectedBackup === backupId ? 'remediation-backup' : ''}`}
                       onClick={() => setSelectedBackup(backupId)}
                     >
                       <div className="backup-header">
@@ -209,6 +270,9 @@ export default function Rollback() {
                         />
                         <div className="backup-info">
                           <strong>Backup ID: {backupId}</strong>
+                          {remediationInfo && remediationInfo.selectedBackup === backupId && (
+                            <span className="backup-badge">This Remediation's Backup</span>
+                          )}
                           <span className="backup-date">
                             <Clock size={14} />
                             {timestamp ? new Date(timestamp).toLocaleString() : 'Unknown date'}

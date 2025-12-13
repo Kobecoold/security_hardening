@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
-import { ArrowLeft, Database, Calendar, Server, RotateCcw, AlertCircle } from 'lucide-react'
+import { ArrowLeft, Database, Calendar, Server, RotateCcw, AlertCircle, Trash2 } from 'lucide-react'
 import './BackupDetail.css'
 
 export default function BackupDetail() {
@@ -13,6 +13,7 @@ export default function BackupDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [expandedSections, setExpandedSections] = useState({})
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     loadBackupDetail()
@@ -87,6 +88,25 @@ export default function BackupDetail() {
     })
   }
 
+  const handleDelete = async () => {
+    const backupId = backup.backup_id || backup._id
+    if (!window.confirm(`Are you sure you want to delete backup ${backupId}? This action cannot be undone.`)) {
+      return
+    }
+
+    try {
+      setDeleting(true)
+      await api.delete(`/backups/${backupId}`)
+      alert('Backup deleted successfully')
+      navigate('/backups')
+    } catch (err) {
+      console.error('Error deleting backup:', err)
+      alert(err.response?.data?.detail || 'Failed to delete backup')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   const formatDate = (dateString) => {
     if (!dateString) return 'Unknown'
     try {
@@ -143,10 +163,20 @@ export default function BackupDetail() {
           <h1>Backup Details</h1>
         </div>
         {userRole === 'admin' && (
-          <button onClick={handleRollback} className="btn-rollback-large">
-            <RotateCcw size={18} />
-            Rollback to this Backup
-          </button>
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <button onClick={handleRollback} className="btn-rollback-large">
+              <RotateCcw size={18} />
+              Rollback to this Backup
+            </button>
+            <button 
+              onClick={handleDelete} 
+              className="btn-delete-large"
+              disabled={deleting}
+            >
+              <Trash2 size={18} />
+              {deleting ? 'Deleting...' : 'Delete Backup'}
+            </button>
+          </div>
         )}
       </div>
 

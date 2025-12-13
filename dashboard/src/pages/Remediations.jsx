@@ -148,24 +148,34 @@ export default function Remediations() {
                     )}
                   </div>
                 )}
+              {remediation.backup_id && (
+                <div className="detail-item">
+                  <strong>Backup ID:</strong>{' '}
+                  <code className="backup-id-code">{remediation.backup_id}</code>
+                </div>
+              )}
               {remediation.rollback_status && (
                 <div className="detail-item">
-                  <strong>Rollback:</strong>{' '}
+                  <strong>Rollback Status:</strong>{' '}
                   <span className={remediation.rollback_status === 'AVAILABLE' ? 'rollback-available' : 'rollback-unavailable'}>
                     {remediation.rollback_status}
                   </span>
-                  {remediation.rollback_status === 'AVAILABLE' && userRole && String(userRole).trim().toLowerCase() === 'admin' && (
+                  {remediation.rollback_status === 'AVAILABLE' && remediation.backup_id && userRole && String(userRole).trim().toLowerCase() === 'admin' && (
                     <button
                       onClick={() => navigate('/rollback', {
                         state: {
                           host: remediation.host,
-                          osType: remediation.os_type || remediation.os
+                          osType: remediation.os_type || remediation.os || remediation.client_type === 'linux' ? 'linux' : 'windows',
+                          selectedBackup: remediation.backup_id,
+                          remediationId: remediation.remediation_id || remediation._id,
+                          ruleId: remediation.rule_id
                         }
                       })}
                       className="btn-rollback-small"
+                      title={`Rollback to state before remediation of rule ${remediation.rule_id || 'N/A'}`}
                     >
                       <RotateCcw size={14} />
-                      Rollback
+                      Rollback this Remediation
                     </button>
                   )}
                 </div>

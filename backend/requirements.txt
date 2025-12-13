@@ -5,3 +5,4 @@ paramiko==3.4.0  # Cho SSH
 pywinrm==0.4.3  
 pyyaml==6.0.1    
 python-multipart
+APScheduler==3.10.4

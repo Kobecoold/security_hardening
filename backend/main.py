@@ -12,6 +12,8 @@ import time
 import traceback
 import os
 from datetime import datetime
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 # Import từ các module mới
 from utils import load_rules, load_rules_by_os, load_remediation_script, load_windows_remediation_script
@@ -45,6 +47,39 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Scheduled task để tự động xóa backup cũ hơn 7 ngày
+scheduler = BackgroundScheduler()
+
+def cleanup_old_backups_job():
+    """Job tự động xóa backup cũ hơn 7 ngày."""
+    try:
+        print("🧹 Running scheduled backup cleanup...")
+        deleted_count = db.cleanup_old_backups(days=7)
+        print(f"✅ Cleanup completed: {deleted_count} backups deleted")
+    except Exception as e:
+        print(f"❌ Scheduled cleanup failed: {e}")
+
+# Schedule cleanup job chạy mỗi ngày lúc 2:00 AM
+scheduler.add_job(
+    cleanup_old_backups_job,
+    trigger=CronTrigger(hour=2, minute=0),
+    id='cleanup_old_backups',
+    name='Cleanup backups older than 7 days',
+    replace_existing=True
+)
+
+@app.on_event("startup")
+async def startup_event():
+    """Khởi động scheduler khi app start."""
+    scheduler.start()
+    print("✅ Background scheduler started - Backup cleanup scheduled daily at 2:00 AM")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Dừng scheduler khi app shutdown."""
+    scheduler.shutdown()
+    print("✅ Background scheduler stopped")
 
 # Serve React dashboard (production build) - Priority 1
 # Note: Dashboard routes will be registered at the END of file to avoid conflicts with API routes
@@ -737,6 +772,42 @@ async def get_linux_backups(host: Optional[str] = None):
         
         return {"total": len(backups), "backups": backups}
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/backups/{backup_id}", dependencies=[RequireAdmin])
+async def delete_backup(backup_id: str):
+    """Xóa một backup theo backup_id."""
+    try:
+        success = db.delete_backup(backup_id)
+        if success:
+            return {
+                "status": "success",
+                "message": f"Backup {backup_id} deleted successfully",
+                "backup_id": backup_id
+            }
+        else:
+            raise HTTPException(status_code=404, detail=f"Backup {backup_id} not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Failed to delete backup: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/backups/cleanup", dependencies=[RequireAdmin])
+async def cleanup_old_backups(days: int = 7):
+    """Xóa các backup cũ hơn số ngày chỉ định (mặc định 7 ngày)."""
+    try:
+        deleted_count = db.cleanup_old_backups(days=days)
+        return {
+            "status": "success",
+            "message": f"Cleaned up {deleted_count} backups older than {days} days",
+            "deleted_count": deleted_count,
+            "days": days
+        }
+    except Exception as e:
+        print(f"❌ Failed to cleanup old backups: {e}")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/remediate/linux", dependencies=[RequireAdmin])

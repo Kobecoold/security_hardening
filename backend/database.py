@@ -150,6 +150,47 @@ class AuditDB:
     def get_backups_not_linux(self, limit: int = 50) -> List[Dict]:
         """Lấy danh sách backups không phải Linux (Windows)"""
         return list(self.backups.find({"os_type": {"$ne": "linux"}}, sort=[("timestamp", -1)]).limit(limit))
+    
+    def delete_backup(self, backup_id: str) -> bool:
+        """Xóa một backup theo backup_id."""
+        try:
+            result = self.backups.delete_one({"backup_id": backup_id})
+            if result.deleted_count > 0:
+                print(f"✅ Backup deleted: {backup_id}")
+                return True
+            else:
+                # Thử xóa bằng _id nếu không tìm thấy bằng backup_id
+                result = self.backups.delete_one({"_id": backup_id})
+                if result.deleted_count > 0:
+                    print(f"✅ Backup deleted by _id: {backup_id}")
+                    return True
+                print(f"⚠️ Backup not found: {backup_id}")
+                return False
+        except Exception as e:
+            print(f"❌ Failed to delete backup: {e}")
+            raise
+    
+    def cleanup_old_backups(self, days: int = 7) -> int:
+        """Xóa các backup cũ hơn số ngày chỉ định (mặc định 7 ngày)."""
+        try:
+            from datetime import timedelta
+            cutoff_date = datetime.utcnow() - timedelta(days=days)
+            
+            # Xóa backups có timestamp hoặc created_at cũ hơn cutoff_date
+            query = {
+                "$or": [
+                    {"timestamp": {"$lt": cutoff_date}},
+                    {"created_at": {"$lt": cutoff_date}}
+                ]
+            }
+            
+            result = self.backups.delete_many(query)
+            deleted_count = result.deleted_count
+            print(f"✅ Cleaned up {deleted_count} backups older than {days} days")
+            return deleted_count
+        except Exception as e:
+            print(f"❌ Failed to cleanup old backups: {e}")
+            raise
 
 # Kết nối đến MongoDB Docker container
 db = AuditDB()

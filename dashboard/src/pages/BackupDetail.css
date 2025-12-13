@@ -37,12 +37,12 @@
   background: #4b5563;
 }
 
-.btn-rollback-large {
+.btn-rollback-large,
+.btn-delete-large {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 12px 24px;
-  background: #f59e0b;
   color: white;
   border: none;
   border-radius: 8px;
@@ -51,8 +51,26 @@
   transition: background 0.2s;
 }
 
+.btn-rollback-large {
+  background: #f59e0b;
+}
+
 .btn-rollback-large:hover {
   background: #d97706;
+}
+
+.btn-delete-large {
+  background: #ef4444;
+}
+
+.btn-delete-large:hover {
+  background: #dc2626;
+}
+
+.btn-delete-large:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .error-banner {

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
-import { Database, RefreshCw, Filter, RotateCcw, Server, Calendar, Eye } from 'lucide-react'
+import { Database, RefreshCw, Filter, RotateCcw, Server, Calendar, Eye, Trash2 } from 'lucide-react'
 import './Backups.css'
 
 export default function Backups() {
@@ -13,6 +13,7 @@ export default function Backups() {
   const [error, setError] = useState(null)
   const [filter, setFilter] = useState('all') // all, linux, windows
   const [hostFilter, setHostFilter] = useState('')
+  const [deletingBackup, setDeletingBackup] = useState(null)
 
   useEffect(() => {
     loadBackups()
@@ -87,6 +88,26 @@ export default function Backups() {
         selectedBackup: backup.backup_id || backup._id
       }
     })
+  }
+
+  const handleDeleteBackup = async (backup) => {
+    const backupId = backup.backup_id || backup._id
+    if (!window.confirm(`Are you sure you want to delete backup ${backupId}? This action cannot be undone.`)) {
+      return
+    }
+
+    try {
+      setDeletingBackup(backupId)
+      await api.delete(`/backups/${backupId}`)
+      // Remove from list immediately
+      setBackups(prev => prev.filter(b => (b.backup_id || b._id) !== backupId))
+      alert('Backup deleted successfully')
+    } catch (err) {
+      console.error('Error deleting backup:', err)
+      alert(err.response?.data?.detail || 'Failed to delete backup')
+    } finally {
+      setDeletingBackup(null)
+    }
   }
 
   const formatDate = (dateString) => {
@@ -250,13 +271,23 @@ export default function Backups() {
                     View Details
                   </button>
                   {userRole === 'admin' && (
-                    <button
-                      onClick={() => handleRollback(backup)}
-                      className="btn-rollback"
-                    >
-                      <RotateCcw size={14} />
-                      Rollback
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleRollback(backup)}
+                        className="btn-rollback"
+                      >
+                        <RotateCcw size={14} />
+                        Rollback
+                      </button>
+                      <button
+                        onClick={() => handleDeleteBackup(backup)}
+                        className="btn-delete"
+                        disabled={deletingBackup === backupId}
+                      >
+                        <Trash2 size={14} />
+                        {deletingBackup === backupId ? 'Deleting...' : 'Delete'}
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
