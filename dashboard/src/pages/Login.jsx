@@ -1,25 +1,42 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import api from '../services/api'
-import { Shield, User, Key, UserPlus } from 'lucide-react'
+import { Shield, User, UserPlus } from 'lucide-react'
 import './Login.css'
 
 export default function Login() {
-  const [loginMode, setLoginMode] = useState('user') // 'user', 'apikey', or 'register'
+  const [loginMode, setLoginMode] = useState('user') // 'user' or 'register'
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [apiKey, setApiKey] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [registerData, setRegisterData] = useState({
     username: '',
     password: '',
-    email: '',
-    role: 'admin'
+    email: ''
   })
-  const { login, loginWithUser } = useAuth()
+  const [hasUsers, setHasUsers] = useState(true) // Assume users exist until checked
+  const { loginWithUser } = useAuth()
   const navigate = useNavigate()
+
+  useEffect(() => {
+    checkIfUsersExist()
+  }, [])
+
+  const checkIfUsersExist = async () => {
+    try {
+      const response = await api.get('/auth/users/count')
+      setHasUsers(response.data.count > 0)
+      if (response.data.count === 0) {
+        setLoginMode('register') // Auto-switch to register if no users
+      }
+    } catch (err) {
+      console.error('Error checking users:', err)
+      // Assume users exist if API call fails
+      setHasUsers(true)
+    }
+  }
 
   const handleUserLogin = async (e) => {
     e.preventDefault()
@@ -42,27 +59,6 @@ export default function Login() {
     }
   }
 
-  const handleApiKeyLogin = async (e) => {
-    e.preventDefault()
-    setError('')
-    setLoading(true)
-
-    try {
-      const result = await login(apiKey)
-      if (result.success) {
-        navigate('/')
-      } else {
-        setError(result.error || 'Invalid API key. Please check your API key and ensure backend is running.')
-        console.error('Login failed:', result.error)
-      }
-    } catch (err) {
-      console.error('Login exception:', err)
-      setError(err.message || 'Failed to connect. Please check your API key and backend connection.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   const handleRegister = async (e) => {
     e.preventDefault()
     setError('')
@@ -73,7 +69,7 @@ export default function Login() {
       formData.append('username', registerData.username)
       formData.append('password', registerData.password)
       formData.append('email', registerData.email)
-      formData.append('role', registerData.role)
+      // Role is determined by backend - first user is admin, others are user
 
       const response = await api.post('/auth/users/register', formData, {
         headers: {
@@ -124,13 +120,6 @@ export default function Login() {
             <UserPlus size={18} />
             Register
           </button>
-          <button
-            className={`tab ${loginMode === 'apikey' ? 'active' : ''}`}
-            onClick={() => setLoginMode('apikey')}
-          >
-            <Key size={18} />
-            API Key
-          </button>
         </div>
 
         {loginMode === 'user' ? (
@@ -163,7 +152,7 @@ export default function Login() {
               {loading ? 'Signing in...' : 'Sign In'}
             </button>
           </form>
-        ) : loginMode === 'register' ? (
+        ) : (
           <form onSubmit={handleRegister} className="login-form">
             <div className="form-group">
               <label htmlFor="reg-username">Username *</label>
@@ -200,39 +189,23 @@ export default function Login() {
               />
             </div>
             <div className="form-group">
-              <label htmlFor="reg-role">Role *</label>
-              <select
+              <label htmlFor="reg-role">Role</label>
+              <input
                 id="reg-role"
-                value={registerData.role}
-                onChange={(e) => setRegisterData({ ...registerData, role: e.target.value })}
-                required
-              >
-                <option value="admin">Admin (Full Access)</option>
-                <option value="user">User (View Only)</option>
-              </select>
+                type="text"
+                value={hasUsers ? 'User (View Only)' : 'Admin (Full Access)'}
+                disabled
+                className="disabled-input"
+              />
+              <small>
+                {hasUsers
+                  ? 'Only one admin account is allowed. New users can only be created as regular users.'
+                  : 'This will be the first admin account.'}
+              </small>
             </div>
             {error && <div className="error-message">{error}</div>}
             <button type="submit" disabled={loading} className="login-button">
               {loading ? 'Registering...' : 'Register'}
-            </button>
-          </form>
-        ) : (
-          <form onSubmit={handleApiKeyLogin} className="login-form">
-            <div className="form-group">
-              <label htmlFor="api-key">API Key</label>
-              <input
-                id="api-key"
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk_..."
-                required
-                autoFocus
-              />
-            </div>
-            {error && <div className="error-message">{error}</div>}
-            <button type="submit" disabled={loading} className="login-button">
-              {loading ? 'Connecting...' : 'Connect'}
             </button>
           </form>
         )}
@@ -240,9 +213,6 @@ export default function Login() {
         <div className="login-footer">
           {loginMode === 'user' && (
             <p>First time? <button type="button" onClick={() => setLoginMode('register')} className="link-button">Register here</button></p>
-          )}
-          {loginMode === 'apikey' && (
-            <p>Don't have an API key? Use <code>/auth/setup</code> endpoint to create one.</p>
           )}
           {loginMode === 'register' && (
             <p>Already have an account? <button type="button" onClick={() => setLoginMode('user')} className="link-button">Login here</button></p>

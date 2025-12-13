@@ -1071,15 +1071,14 @@ async def get_audit_detail(audit_id: str):
 
 # ==================== USER AUTHENTICATION ENDPOINTS ====================
 
-@app.post("/auth/users/register", dependencies=[RequireAuth])
+@app.post("/auth/users/register")
 async def register_user(
     username: str = Form(...),
     password: str = Form(..., json_schema_extra={"format": "password"}),
     email: str = Form(""),
-    role: str = Form("user"),
     api_key: Optional[str] = Security(API_KEY_HEADER),
 ):
-    """Đăng ký user mới. Admin only hoặc first user."""
+    """Đăng ký user mới. Không cần API key cho first user. Admin only cho các user sau."""
     try:
         # Check if this is the first user (no auth required)
         is_first_user = not user_manager.has_any_users()
@@ -1096,13 +1095,15 @@ async def register_user(
             user_info = auth_manager.get_api_key_user(api_key)
             if not user_info or user_info.get("role") != "admin":
                 raise HTTPException(status_code=403, detail="Only admins can create users")
+            
+            # Force role to be 'user' for non-first users (không tin tưởng input từ client)
+            role = "user"
+        else:
+            # First user is always admin
+            role = "admin"
         
-        # Không cho phép tạo user với role admin (chỉ có 1 admin duy nhất)
-        if role == "admin":
-            raise HTTPException(status_code=400, detail="Cannot create admin user. Only one admin account is allowed.")
-        
-        # Force role to be 'user' (không tin tưởng input từ client)
-        user = user_manager.create_user(username, password, email, "user")
+        # Create user with determined role
+        user = user_manager.create_user(username, password, email, role)
         return {
             "status": "success",
             "message": "User created successfully",
