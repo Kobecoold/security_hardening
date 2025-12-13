@@ -150,16 +150,23 @@ export default function UsersPage() {
     setCreating(true)
 
     try {
+      console.log('Deleting user:', deletingUser.username)
       const response = await api.delete(`/auth/users/${deletingUser.username}`)
+      console.log('Delete response:', response.data)
 
       if (response.data.status === 'success') {
+        // Remove user from state immediately (optimistic update)
+        setUsers(prevUsers => prevUsers.filter(u => u.username !== deletingUser.username))
         setDeletingUser(null)
-        // Reload users list immediately
+        // Reload users list to ensure sync
         await loadUsers()
+      } else {
+        setError('Delete failed: ' + (response.data.message || 'Unknown error'))
       }
     } catch (err) {
       console.error('Error deleting user:', err)
-      setError(err.response?.data?.detail || 'Failed to delete user')
+      setError(err.response?.data?.detail || err.message || 'Failed to delete user')
+    } finally {
       setCreating(false)
     }
   }

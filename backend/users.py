@@ -146,9 +146,12 @@ class UserManager:
     
     def delete_user(self, username: str) -> bool:
         """Xóa user (hard delete - xóa hoàn toàn khỏi database)."""
+        # Tìm user kể cả inactive (để có thể xóa user đã bị soft delete)
         user = self.users_collection.find_one({"username": username})
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
+        
+        print(f"🗑️ Attempting to delete user: {username}, role: {user.get('role')}")
         
         # Không cho phép xóa admin cuối cùng
         if user.get("role") == "admin":
@@ -157,15 +160,18 @@ class UserManager:
                 "role": "admin",
                 "$or": [{"is_active": True}, {"is_active": {"$exists": False}}]
             })
+            print(f"   Admin count: {admin_count}")
             if admin_count <= 1:
                 raise HTTPException(status_code=400, detail="Cannot delete the last admin user")
         
         # Hard delete - xóa hoàn toàn khỏi database
         result = self.users_collection.delete_one({"username": username})
+        print(f"   Delete result: deleted_count = {result.deleted_count}")
         
         if result.deleted_count == 0:
             raise HTTPException(status_code=500, detail="Failed to delete user")
         
+        print(f"✅ User {username} deleted successfully")
         return True
     
     def change_role(self, username: str, new_role: str) -> Dict:
