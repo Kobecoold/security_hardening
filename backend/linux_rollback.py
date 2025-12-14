@@ -489,6 +489,9 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                         perms_key = f"perms_{file_key.replace('file_', '')}"
                         perms_data = backup.get("data", {}).get(perms_key, "")
                         
+                        print(f"   🔍 Looking for permissions key: {perms_key}")
+                        print(f"   🔍 Found permissions data: {perms_data if perms_data else 'NOT FOUND'}")
+                        
                         if perms_data and perms_data != "unknown":
                             # Parse permissions (format: "644 root:root" or "600 0:0")
                             parts = perms_data.split()
@@ -503,30 +506,94 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                                     owner = owner_group
                                     group = owner_group
                                 
-                                # Restore permissions and ownership
+                                # Convert numeric IDs to names if needed (0 -> root)
+                                # But keep as-is if it's already a name (root)
+                                # chown can handle both numeric and name, but let's be explicit
+                                chown_owner = owner
+                                chown_group = group
+                                
+                                print(f"   🔄 Restoring permissions: {perms} {owner}:{group}")
+                                
+                                # Restore permissions and ownership with verification
+                                # Use explicit chmod and chown, then verify
                                 restore_perm_script = f"""
                                 if [ -f {file_path} ]; then
-                                    chmod {perms} {file_path}
-                                    chown {owner}:{group} {file_path}
-                                    echo "Permissions restored: {perms} {owner}:{group}"
+                                    # Set permissions
+                                    chmod {perms} {file_path} 2>&1 || echo "CHMOD_ERROR:$?"
+                                    # Set ownership (chown can handle both numeric and name)
+                                    chown {chown_owner}:{chown_group} {file_path} 2>&1 || echo "CHOWN_ERROR:$?"
+                                    # Verify the change using numeric format for consistency
+                                    current_perms=$(stat -c "%a %u %g" {file_path} 2>/dev/null)
+                                    current_perms_names=$(stat -c "%a %U:%G" {file_path} 2>/dev/null)
+                                    echo "VERIFY_NUMERIC:$current_perms"
+                                    echo "VERIFY_NAMES:$current_perms_names"
                                 else
-                                    echo "File not found: {file_path}"
+                                    echo "ERROR:File not found: {file_path}"
                                 fi
                                 """
                                 result_perms = run_bash_check_stdin(
                                     ssh, restore_perm_script, use_sudo=True, sudo_password=sudo_password, timeout=15
                                 )
                                 
-                                if result_perms["exit_status"] == 0:
+                                # Parse verification output
+                                verify_output = result_perms.get("stdout", "")
+                                verified_perms = None
+                                verified_perms_names = None
+                                
+                                # Parse numeric format (e.g., "644 0 0")
+                                if "VERIFY_NUMERIC:" in verify_output:
+                                    verify_lines = [line for line in verify_output.split("\n") if "VERIFY_NUMERIC:" in line]
+                                    if verify_lines:
+                                        verified_perms = verify_lines[0].replace("VERIFY_NUMERIC:", "").strip()
+                                
+                                # Parse names format (e.g., "644 root:root")
+                                if "VERIFY_NAMES:" in verify_output:
+                                    verify_lines = [line for line in verify_output.split("\n") if "VERIFY_NAMES:" in line]
+                                    if verify_lines:
+                                        verified_perms_names = verify_lines[0].replace("VERIFY_NAMES:", "").strip()
+                                
+                                # Check for errors
+                                has_chmod_error = "CHMOD_ERROR:" in verify_output
+                                has_chown_error = "CHOWN_ERROR:" in verify_output
+                                
+                                if result_perms["exit_status"] == 0 and verified_perms:
+                                    # Check if permissions match what we set
+                                    # verified_perms format: "644 0 0" (numeric)
+                                    # We need to check if the first part (permissions) matches
+                                    verified_parts = verified_perms.split()
+                                    if len(verified_parts) >= 1 and verified_parts[0] == perms:
+                                        rollback_details[file_path] = {
+                                            "status": "RESTORED",
+                                            "content_restored": True,
+                                            "permissions": perms,
+                                            "owner": owner,
+                                            "group": group,
+                                            "verified_perms": verified_perms,
+                                            "message": f"File content and permissions restored: {perms} {owner}:{group} (verified: {verified_perms})"
+                                        }
+                                        print(f"   ✓ Permissions restored for {file_path}: {perms} {owner}:{group} (verified: {verified_perms})")
+                                    else:
+                                        rollback_details[file_path] = {
+                                            "status": "PARTIAL",
+                                            "content_restored": True,
+                                            "permissions_restored": False,
+                                            "expected": f"{perms} {owner}:{group}",
+                                            "actual": verified_perms,
+                                            "error": "Permissions verification failed",
+                                            "message": f"File content restored but permissions mismatch: expected {perms}, got {verified_perms}"
+                                        }
+                                        print(f"   ⚠️ Permissions restore verification failed for {file_path}: expected {perms}, got {verified_perms}")
+                                else:
                                     rollback_details[file_path] = {
-                                        "status": "RESTORED",
+                                        "status": "PARTIAL",
                                         "content_restored": True,
-                                        "permissions": perms,
-                                        "owner": owner,
-                                        "group": group,
-                                        "message": f"File content and permissions restored: {perms} {owner}:{group}"
+                                        "permissions_restored": False,
+                                        "error": result_perms.get("stderr", ""),
+                                        "stdout": result_perms.get("stdout", ""),
+                                        "message": f"File content restored but permissions restore failed or could not verify"
                                     }
-                                    print(f"   ✓ Permissions restored for {file_path}: {perms} {owner}:{group}")
+                                    print(f"   ⚠️ Failed to restore permissions for {file_path}: {result_perms.get('stderr', '')}")
+                                    print(f"   ⚠️ stdout: {result_perms.get('stdout', '')}")
                                 else:
                                     rollback_details[file_path] = {
                                         "status": "PARTIAL",
