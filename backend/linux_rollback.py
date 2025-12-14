@@ -4,7 +4,9 @@ from datetime import datetime
 from typing import Dict, Optional, List, Any
 from database import db
 from linux_audit import ssh_connect, run_bash_check_stdin
+from utils import load_remediation_script, SCRIPTS_DIR
 import re
+import os
 
 
 class LinuxRollbackManager:
@@ -223,72 +225,132 @@ class LinuxRollbackManager:
             # Không raise exception để remediation vẫn chạy được
             return None
     
+    def _extract_files_from_script(self, script_content: str) -> List[str]:
+        """Extract file paths từ remediation script bằng cách tìm các patterns phổ biến."""
+        files = []
+        if not script_content:
+            return files
+        
+        # Patterns để tìm file paths trong bash script
+        # Tìm các patterns như: /etc/..., /boot/..., chmod /path/to/file, chown /path/to/file, etc.
+        patterns = [
+            r'(?:chmod|chown|cp|mv|cat\s+>|echo\s+.*>>|sed\s+-i.*)\s+([/][^\s\";\']+)',  # Commands với absolute paths
+            r'["\']([/][^"\']+)["\']',  # Quoted absolute paths
+            r'CONFIG_FILE=["\']([/][^"\']+)["\']',  # CONFIG_FILE variable
+            r'FILE=["\']([/][^"\']+)["\']',  # FILE variable
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, script_content)
+            for match in matches:
+                # Clean up path (remove trailing characters)
+                path = match.strip().rstrip(';').rstrip(')').rstrip('}')
+                if path.startswith('/') and os.path.basename(path):  # Valid absolute path
+                    files.append(path)
+        
+        return list(set(files))  # Remove duplicates
+    
     def _get_files_to_backup_for_rule(self, rule_id: Optional[str]) -> List[str]:
-        """Xác định các file cần backup dựa vào rule_id."""
+        """Xác định các file cần backup dựa vào rule_id và remediation script."""
         if not rule_id:
             # Fallback: backup SSH config nếu không có rule_id
             return ["/etc/ssh/sshd_config"]
         
         files_to_backup = []
         
-        # Rule về SSH (5.2.x)
-        if '5.2.' in rule_id:
-            files_to_backup.append("/etc/ssh/sshd_config")
+        # Thử extract files từ remediation script trước
+        try:
+            # Extract OS name từ rule_id (e.g., cis-ubuntu-20.04-1.4.1 -> ubuntu-20.04)
+            os_name_match = re.search(r'cis-([^-]+-\d+\.\d+)', rule_id)
+            if os_name_match:
+                os_name = os_name_match.group(1)
+                script_content = load_remediation_script(os_name, rule_id)
+                if script_content:
+                    script_files = self._extract_files_from_script(script_content)
+                    files_to_backup.extend(script_files)
+                    print(f"   📝 Extracted {len(script_files)} files from remediation script")
+        except Exception as e:
+            print(f"   ⚠️ Failed to extract files from script: {e}")
+        
+        # Fallback: Pattern-based mapping cho các rules phổ biến
+        # Rule về SSH (5.2.x, 5.3.x)
+        if any(x in rule_id for x in ['5.2.', '5.3.']):
+            if '/etc/ssh/sshd_config' not in files_to_backup:
+                files_to_backup.append("/etc/ssh/sshd_config")
         
         # Rule về file system mounts (1.1.x)
         if '1.1.' in rule_id:
-            # Các rule về /tmp, /var/tmp, /home, etc.
-            if 'tmp' in rule_id.lower():
-                files_to_backup.append("/etc/fstab")
+            if 'tmp' in rule_id.lower() or 'var/tmp' in rule_id.lower():
+                if '/etc/fstab' not in files_to_backup:
+                    files_to_backup.append("/etc/fstab")
             elif 'home' in rule_id.lower():
-                files_to_backup.append("/etc/fstab")
+                if '/etc/fstab' not in files_to_backup:
+                    files_to_backup.append("/etc/fstab")
         
-        # Rule về file permissions (1.2.x, 1.3.x, 1.4.x)
-        if any(x in rule_id for x in ['1.2.', '1.3.', '1.4.']):
-            # Parse rule để tìm file cụ thể
+        # Rule về file permissions (1.2.x, 1.3.x, 1.4.x, 1.7.x)
+        if any(x in rule_id for x in ['1.2.', '1.3.', '1.4.', '1.7.']):
+            # Bootloader
             if '1.4.1' in rule_id or 'bootloader' in rule_id.lower() or 'grub' in rule_id.lower():
-                # Rule 1.4.1: Bootloader permissions
-                files_to_backup.append("/boot/grub/grub.cfg")
-            elif 'passwd' in rule_id.lower() or '1.1.1' in rule_id:
-                files_to_backup.append("/etc/passwd")
-            elif 'group' in rule_id.lower() or '1.1.2' in rule_id:
-                files_to_backup.append("/etc/group")
+                if '/boot/grub/grub.cfg' not in files_to_backup:
+                    files_to_backup.append("/boot/grub/grub.cfg")
+            # MOTD
+            elif '1.7.1' in rule_id or 'motd' in rule_id.lower():
+                if '/etc/motd' not in files_to_backup:
+                    files_to_backup.append("/etc/motd")
+            # Common system files
+            elif 'passwd' in rule_id.lower():
+                if '/etc/passwd' not in files_to_backup:
+                    files_to_backup.append("/etc/passwd")
+            elif 'group' in rule_id.lower():
+                if '/etc/group' not in files_to_backup:
+                    files_to_backup.append("/etc/group")
             elif 'shadow' in rule_id.lower():
-                files_to_backup.append("/etc/shadow")
+                if '/etc/shadow' not in files_to_backup:
+                    files_to_backup.append("/etc/shadow")
             elif 'gshadow' in rule_id.lower():
-                files_to_backup.append("/etc/gshadow")
+                if '/etc/gshadow' not in files_to_backup:
+                    files_to_backup.append("/etc/gshadow")
             elif 'fstab' in rule_id.lower():
-                files_to_backup.append("/etc/fstab")
+                if '/etc/fstab' not in files_to_backup:
+                    files_to_backup.append("/etc/fstab")
             elif 'crontab' in rule_id.lower():
-                files_to_backup.append("/etc/crontab")
+                if '/etc/crontab' not in files_to_backup:
+                    files_to_backup.append("/etc/crontab")
             elif 'hosts' in rule_id.lower():
-                files_to_backup.append("/etc/hosts")
+                if '/etc/hosts' not in files_to_backup:
+                    files_to_backup.append("/etc/hosts")
             elif 'issue' in rule_id.lower():
-                files_to_backup.append("/etc/issue")
-                files_to_backup.append("/etc/issue.net")
+                if '/etc/issue' not in files_to_backup:
+                    files_to_backup.append("/etc/issue")
+                if '/etc/issue.net' not in files_to_backup:
+                    files_to_backup.append("/etc/issue.net")
         
         # Rule về network (3.x) - sửa sysctl
         if rule_id.startswith('cis-') and any(x in rule_id for x in ['3.1.', '3.2.', '3.3.', '3.4.', '3.5.']):
-            # Network rules sửa /etc/sysctl.conf
-            files_to_backup.append("/etc/sysctl.conf")
-            if 'sshd' in rule_id.lower() or 'ssh' in rule_id.lower():
+            if '/etc/sysctl.conf' not in files_to_backup:
+                files_to_backup.append("/etc/sysctl.conf")
+            if ('sshd' in rule_id.lower() or 'ssh' in rule_id.lower()) and '/etc/ssh/sshd_config' not in files_to_backup:
                 files_to_backup.append("/etc/ssh/sshd_config")
         
         # Rule về logging (4.x)
         if rule_id.startswith('cis-') and '4.' in rule_id:
-            if 'rsyslog' in rule_id.lower():
+            if 'rsyslog' in rule_id.lower() and '/etc/rsyslog.conf' not in files_to_backup:
                 files_to_backup.append("/etc/rsyslog.conf")
-            elif 'logrotate' in rule_id.lower():
+            elif 'logrotate' in rule_id.lower() and '/etc/logrotate.conf' not in files_to_backup:
                 files_to_backup.append("/etc/logrotate.conf")
+            elif 'audit' in rule_id.lower():
+                # Audit rules có thể sửa /etc/audit/rules.d/
+                if '/etc/audit/audit.rules' not in files_to_backup:
+                    files_to_backup.append("/etc/audit/audit.rules")
         
         # Rule về access control (5.x)
         if rule_id.startswith('cis-') and '5.' in rule_id:
-            if 'sshd' in rule_id.lower() or 'ssh' in rule_id.lower():
+            if ('sshd' in rule_id.lower() or 'ssh' in rule_id.lower()) and '/etc/ssh/sshd_config' not in files_to_backup:
                 files_to_backup.append("/etc/ssh/sshd_config")
-            elif 'sudo' in rule_id.lower():
+            elif 'sudo' in rule_id.lower() and '/etc/sudoers' not in files_to_backup:
                 files_to_backup.append("/etc/sudoers")
         
-        # Nếu không tìm thấy file cụ thể, backup SSH config (phổ biến nhất)
+        # Nếu không tìm thấy file nào, backup SSH config (phổ biến nhất)
         if not files_to_backup:
             files_to_backup.append("/etc/ssh/sshd_config")
         
