@@ -22,6 +22,27 @@ export default function AuditForm({ osType = 'linux' }) {
   })
   
   const [showSudoWarning, setShowSudoWarning] = useState(false)
+  
+  // Validate form before submit
+  const validateForm = () => {
+    if (!formData.host || !formData.host.trim()) {
+      setError('Host is required')
+      return false
+    }
+    if (!formData.username || !formData.username.trim()) {
+      setError('Username is required. Please provide a valid username (not empty).')
+      return false
+    }
+    if (!formData.password && !formData.key_path) {
+      setError('Either password or SSH key path is required')
+      return false
+    }
+    if (formData.use_sudo && !formData.sudo_password) {
+      // Warning but not blocking - user might have NOPASSWD sudo
+      console.warn('Use sudo is enabled but no sudo password provided. Assuming NOPASSWD sudo.')
+    }
+    return true
+  }
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target
@@ -39,8 +60,8 @@ export default function AuditForm({ osType = 'linux' }) {
 
     try {
       const formDataToSend = new FormData()
-      formDataToSend.append('Host', formData.host)
-      formDataToSend.append('Username', formData.username)
+      formDataToSend.append('Host', formData.host.trim())
+      formDataToSend.append('Username', formData.username.trim())
       if (formData.key_path) formDataToSend.append('Key_path', formData.key_path)
       if (formData.password) formDataToSend.append('Password', formData.password)
       formDataToSend.append('Use_sudo', formData.use_sudo)
@@ -67,15 +88,30 @@ export default function AuditForm({ osType = 'linux' }) {
     } catch (err) {
       console.error('Audit error:', err)
       const errorMessage = err.response?.data?.detail || err.message || 'Failed to run audit'
-      setError(errorMessage)
-      
-      // Check if error is related to sudo password
       const errorStr = String(errorMessage).toLowerCase()
-      if (errorStr.includes('sudo') && (errorStr.includes('password') || errorStr.includes('required'))) {
+      
+      // Check if error is SSH authentication
+      if (errorStr.includes('authentication') || errorStr.includes('auth failed')) {
+        let detailedError = 'SSH Authentication failed. '
+        if (errorStr.includes('username')) {
+          detailedError += 'Please check your username. '
+        }
+        if (errorStr.includes('password') || errorStr.includes('key')) {
+          detailedError += 'Please check your password or SSH key. '
+        }
+        detailedError += `Original error: ${errorMessage}`
+        setError(detailedError)
+      }
+      // Check if error is related to sudo password
+      else if (errorStr.includes('sudo') && (errorStr.includes('password') || errorStr.includes('required'))) {
+        setError(errorMessage)
         setShowSudoWarning(true)
         if (!formData.use_sudo) {
           setFormData(prev => ({ ...prev, use_sudo: true }))
         }
+      }
+      else {
+        setError(errorMessage)
       }
     } finally {
       setLoading(false)
@@ -114,7 +150,7 @@ export default function AuditForm({ osType = 'linux' }) {
             </div>
 
             <div className="form-group">
-              <label htmlFor="username">Username</label>
+              <label htmlFor="username">Username *</label>
               <input
                 id="username"
                 name="username"
@@ -122,7 +158,11 @@ export default function AuditForm({ osType = 'linux' }) {
                 value={formData.username}
                 onChange={handleChange}
                 placeholder="root or your-username"
+                required
               />
+              <small style={{display: 'block', marginTop: '4px', color: '#666'}}>
+                Enter a valid username (not empty). Common: root, ubuntu, admin, or your user account.
+              </small>
             </div>
 
 

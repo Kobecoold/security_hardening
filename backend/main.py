@@ -397,8 +397,31 @@ async def audit_linux_json(
 ):
     """Audit Linux: auto-detect OS và chạy tất cả CIS rules."""
     try:
+        # Validate inputs
+        if not Host or not Host.strip():
+            raise HTTPException(status_code=400, detail="Host is required")
+        if not Username or not Username.strip():
+            raise HTTPException(status_code=400, detail="Username is required. Please provide a valid username (not empty).")
+        
+        Host = Host.strip()
+        Username = Username.strip()
+        
         # Kết nối SSH trước để auto-detect OS
-        ssh = ssh_connect(Host, Username, Key_path or "", password=Password)
+        try:
+            ssh = ssh_connect(Host, Username, Key_path or "", password=Password)
+        except Exception as ssh_error:
+            error_msg = str(ssh_error)
+            if "Authentication" in error_msg or "authentication" in error_msg.lower():
+                raise HTTPException(
+                    status_code=401,
+                    detail=f"SSH Authentication failed: {error_msg}. Please check your username, password, or SSH key."
+                )
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"SSH connection failed: {error_msg}"
+                )
+        
         try:
             detected_os = detect_os(ssh)
             if not detected_os:

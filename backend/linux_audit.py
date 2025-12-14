@@ -32,8 +32,20 @@ def detect_os(ssh: paramiko.SSHClient) -> Optional[str]:
 
 def ssh_connect(host: str, username: str, key_path: str, password: Optional[str] = None) -> paramiko.SSHClient:
     """Kết nối SSH với key hoặc password."""
+    import paramiko.ssh_exception
+    
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    
+    # Validate inputs
+    if not host or not host.strip():
+        raise ValueError("Host is required for SSH connection")
+    if not username or not username.strip():
+        raise ValueError("Username is required for SSH connection. Please provide a valid username (not empty).")
+    
+    # Clean inputs
+    host = host.strip()
+    username = username.strip()
     
     # Chuẩn hóa đường dẫn key và loại bỏ dấu quote vô tình nhập
     key_filename = os.path.expanduser(key_path).strip().strip("\"'") if key_path else None
@@ -46,19 +58,34 @@ def ssh_connect(host: str, username: str, key_path: str, password: Optional[str]
     
     if key_filename and os.path.exists(key_filename):
         connect_kwargs["key_filename"] = key_filename
+        print(f"🔑 Using SSH key: {key_filename}")
     elif password:
         # Fallback dùng mật khẩu nếu không có private key
         connect_kwargs["password"] = password
         connect_kwargs["look_for_keys"] = False
         connect_kwargs["allow_agent"] = False
+        print(f"🔐 Using password authentication")
     else:
         # Key không tồn tại và không có password
         raise FileNotFoundError(
             f"SSH key not found: '{key_filename}'. Provide a valid key_path or a password."
         )
     
-    ssh.connect(**connect_kwargs)
-    return ssh
+    try:
+        ssh.connect(**connect_kwargs)
+        print(f"✅ SSH connection established to {host} as {username}")
+        return ssh
+    except paramiko.ssh_exception.AuthenticationException as e:
+        error_msg = f"SSH Authentication failed for user '{username}' on host '{host}'. "
+        if password:
+            error_msg += "Please check your password or SSH key."
+        else:
+            error_msg += "Please provide a valid password or SSH key."
+        raise paramiko.ssh_exception.AuthenticationException(error_msg) from e
+    except paramiko.ssh_exception.SSHException as e:
+        raise paramiko.ssh_exception.SSHException(f"SSH connection error to {host}: {str(e)}") from e
+    except Exception as e:
+        raise Exception(f"Failed to connect to {host} as {username}: {str(e)}") from e
 
 
 def run_bash_check_stdin(

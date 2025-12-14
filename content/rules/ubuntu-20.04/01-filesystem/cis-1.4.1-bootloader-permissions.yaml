@@ -3,11 +3,24 @@ os: ubuntu-20.04
 title: Ensure bootloader password is set
 benchmark: CIS Ubuntu 20.04 LTS
 level: 1
-description: Ensure permissions on bootloader config are configured
+description: Ensure permissions on bootloader config are configured (should be 600, owned by root:root)
 needs_sudo: true
 check:
   bash: |
-    stat -L -c "%a %u %g" /boot/grub/grub.cfg | grep -E "^0 0 0$"
+    # CIS requires: permissions 600 (rw-------), owner root (0), group root (0)
+    # Format: stat outputs "600 0 0" for permissions, uid, gid
+    if [ ! -f /boot/grub/grub.cfg ]; then
+      exit 1
+    fi
+    perms=$(stat -L -c "%a %u %g" /boot/grub/grub.cfg 2>/dev/null)
+    if echo "$perms" | grep -qE "^600 0 0$"; then
+      exit 0
+    fi
+    # Also accept 400 (read-only) as it's also secure
+    if echo "$perms" | grep -qE "^400 0 0$"; then
+      exit 0
+    fi
+    exit 1
 references:
   - https://ubuntu.com/security/cis
 controls:
