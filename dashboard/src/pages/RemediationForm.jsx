@@ -571,34 +571,94 @@ export default function RemediationForm() {
           )}
 
           {!isLinux && (
-            <div className="form-section">
-              <h2>Windows Connection</h2>
-              
-              <div className="form-group">
-                <label htmlFor="username">Username</label>
-                <input
-                  id="username"
-                  name="username"
-                  type="text"
-                  value={formData.username}
-                  onChange={handleChange}
-                  placeholder="Administrator"
-                />
+            <>
+              {/* Show failed rules for Windows too */}
+              <div className="form-section">
+                <h2>Failed Rules from Latest Audit</h2>
+                
+                {loadingRules ? (
+                  <div className="loading-rules">
+                    <Loader size={20} className="spinner" />
+                    <span>Loading rules...</span>
+                  </div>
+                ) : (
+                  <>
+                    {failedRules.length > 0 && (
+                      <div className="info-banner">
+                        <AlertCircle size={16} />
+                        <span>Showing {failedRules.length} failed rule(s) from the latest audit for {formData.host}. Windows remediation will fix all failed rules.</span>
+                      </div>
+                    )}
+
+                    <div className="rules-list">
+                      {failedRules.length === 0 ? (
+                        <div className="no-rules">
+                          <AlertCircle size={20} />
+                          <span>
+                            {formData.host 
+                              ? `No failed rules found for ${formData.host}. All rules are passing! Please run an audit first if you haven't.`
+                              : 'Please enter host and select OS type first'}
+                          </span>
+                        </div>
+                      ) : (
+                        failedRules
+                          .filter(rule => rule.id && rule.id.trim() !== '')
+                          .map((rule) => (
+                            <div key={rule.id} className="rule-item">
+                              <div className="rule-info">
+                                <div className="rule-id">{rule.id}</div>
+                                <div className="rule-title">{rule.title || 'No title'}</div>
+                                {rule.description && (
+                                  <div className="rule-description">{rule.description}</div>
+                                )}
+                                <div className="rule-meta">
+                                  {rule.level && (
+                                    <span className="rule-level">Level: {rule.level}</span>
+                                  )}
+                                  {rule.status && (
+                                    <span className={`rule-status rule-status-${(rule.status || '').toLowerCase()}`}>
+                                      Status: {rule.status}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
 
-              <div className="form-group">
-                <label htmlFor="password">Password *</label>
-                <input
-                  id="password"
-                  name="password"
-                  type="password"
-                  value={formData.password}
-                  onChange={handleChange}
-                  placeholder="Windows password"
-                  required
-                />
+              <div className="form-section">
+                <h2>Windows Connection</h2>
+                
+                <div className="form-group">
+                  <label htmlFor="username">Username</label>
+                  <input
+                    id="username"
+                    name="username"
+                    type="text"
+                    value={formData.username}
+                    onChange={handleChange}
+                    placeholder="Administrator"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="password">Password *</label>
+                  <input
+                    id="password"
+                    name="password"
+                    type="password"
+                    value={formData.password}
+                    onChange={handleChange}
+                    placeholder="Windows password"
+                    required
+                  />
+                </div>
               </div>
-            </div>
+            </>
           )}
 
           <div className="form-section">
