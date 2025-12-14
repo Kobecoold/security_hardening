@@ -1,25 +1,36 @@
-from fastapi import FastAPI, HTTPException, Form
+from fastapi import FastAPI, HTTPException, Form, Depends, Security
+from fastapi.security import APIKeyHeader
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Optional
 from database import db
 from rollback import rollback_manager
 from linux_rollback import linux_rollback_manager
+from system_backup import system_backup_manager
 
 import time
 import traceback
 import os
 from datetime import datetime
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 # Import từ các module mới
 from utils import load_rules, load_rules_by_os, load_remediation_script, load_windows_remediation_script
 from linux_audit import detect_os, ssh_connect, run_bash_check_stdin, truncate_output, get_linux_host_info
 from windows_audit import winrm_connect, run_winrm_audit, get_windows_host_info, detect_os_windows
-from auth import auth_manager, RequireAuth
+from auth import auth_manager, RequireAuth, API_KEY_HEADER
+from users import user_manager
+
+# Define API_KEY_HEADER for admin check
+if 'API_KEY_HEADER' not in globals():
+    API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 # Đường dẫn đến dashboard
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 DASHBOARD_DIR = os.path.join(REPO_ROOT, "dashboard")
+DASHBOARD_DIST = os.path.join(DASHBOARD_DIR, "dist")
 
 app = FastAPI(
     title="Security Hardening Audit Engine",
@@ -29,23 +40,152 @@ app = FastAPI(
     },
 )
 
-# Serve dashboard static files
-if os.path.exists(DASHBOARD_DIR):
-    app.mount("/dashboard", StaticFiles(directory=DASHBOARD_DIR, html=True), name="dashboard")
-    
-    @app.get("/")
-    async def root_redirect():
-        """Redirect root to dashboard."""
-        return FileResponse(os.path.join(DASHBOARD_DIR, "index.html"))
+# CORS middleware - Allow dashboard to make API calls
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, specify exact origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-@app.get("/")
-async def root():
-    """Root endpoint - API information and quick links."""
+# Scheduled task để tự động xóa backup cũ hơn 7 ngày
+scheduler = BackgroundScheduler()
+
+def cleanup_old_backups_job():
+    """Job tự động xóa backup cũ hơn 7 ngày."""
+    try:
+        print("🧹 Running scheduled backup cleanup...")
+        deleted_count = db.cleanup_old_backups(days=7)
+        print(f"✅ Cleanup completed: {deleted_count} backups deleted")
+    except Exception as e:
+        print(f"❌ Scheduled cleanup failed: {e}")
+
+def run_scheduled_backups_job():
+    """Job chạy scheduled system backups."""
+    try:
+        print("🔄 Running scheduled system backups...")
+        schedules = db.get_backup_schedules()
+        enabled_schedules = [s for s in schedules if s.get("enabled", True)]
+        
+        from datetime import datetime
+        now = datetime.utcnow()
+        current_hour = now.hour
+        current_minute = now.minute
+        current_day = now.weekday()  # 0 = Monday, 6 = Sunday
+        current_date = now.day
+        
+        for schedule in enabled_schedules:
+            try:
+                schedule_time = schedule.get("time", "02:00")
+                schedule_type = schedule.get("scheduleType", "daily")
+                time_parts = schedule_time.split(":")
+                schedule_hour = int(time_parts[0])
+                schedule_minute = int(time_parts[1])
+                
+                should_run = False
+                
+                if schedule_type == "daily":
+                    # Chạy mỗi ngày tại thời điểm chỉ định
+                    should_run = (current_hour == schedule_hour and current_minute == schedule_minute)
+                elif schedule_type == "weekly":
+                    # Chạy mỗi tuần vào thứ 2 (Monday) tại thời điểm chỉ định
+                    should_run = (current_day == 0 and current_hour == schedule_hour and current_minute == schedule_minute)
+                elif schedule_type == "monthly":
+                    # Chạy mỗi tháng vào ngày 1 tại thời điểm chỉ định
+                    should_run = (current_date == 1 and current_hour == schedule_hour and current_minute == schedule_minute)
+                
+                if should_run:
+                    print(f"🔄 Running scheduled backup for {schedule.get('host')}...")
+                    os_type = schedule.get("osType", "linux")
+                    
+                    if os_type == "linux" or os_type.startswith("ubuntu") or os_type.startswith("debian"):
+                        backup_id = system_backup_manager.create_linux_system_backup(
+                            schedule.get("host"),
+                            schedule.get("username", ""),
+                            schedule.get("key_path", "~/.ssh/id_ed25519"),
+                            schedule.get("password"),
+                            schedule.get("sudo_password")
+                        )
+                    else:
+                        backup_id = system_backup_manager.create_windows_system_backup(
+                            schedule.get("host"),
+                            schedule.get("username", "Administrator"),
+                            schedule.get("password")
+                        )
+                    
+                    if backup_id:
+                        print(f"✅ Scheduled backup created: {backup_id}")
+                    else:
+                        print(f"⚠️ Scheduled backup failed for {schedule.get('host')}")
+            except Exception as schedule_error:
+                print(f"❌ Error running scheduled backup for {schedule.get('host')}: {schedule_error}")
+        
+        print(f"✅ Scheduled backups check completed")
+    except Exception as e:
+        print(f"❌ Scheduled backups job failed: {e}")
+
+# Schedule cleanup job chạy mỗi ngày lúc 2:00 AM
+scheduler.add_job(
+    cleanup_old_backups_job,
+    trigger=CronTrigger(hour=2, minute=0),
+    id='cleanup_old_backups',
+    name='Cleanup backups older than 7 days',
+    replace_existing=True
+)
+
+# Schedule backup job chạy mỗi phút để check scheduled backups
+scheduler.add_job(
+    run_scheduled_backups_job,
+    trigger=CronTrigger(minute='*'),  # Chạy mỗi phút
+    id='run_scheduled_backups',
+    name='Run scheduled system backups',
+    replace_existing=True
+)
+
+@app.on_event("startup")
+async def startup_event():
+    """Khởi động scheduler khi app start."""
+    scheduler.start()
+    print("✅ Background scheduler started - Backup cleanup scheduled daily at 2:00 AM")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Dừng scheduler khi app shutdown."""
+    scheduler.shutdown()
+    print("✅ Background scheduler stopped")
+
+# Serve React dashboard (production build) - Priority 1
+# Note: Dashboard routes will be registered at the END of file to avoid conflicts with API routes
+DASHBOARD_BUILT = os.path.exists(DASHBOARD_DIST)
+if DASHBOARD_BUILT:
+    # Serve static assets (JS, CSS, images) - must be before catch-all route
+    assets_dir = os.path.join(DASHBOARD_DIST, "assets")
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="dashboard-assets")
+
+# Fallback: Serve old HTML dashboard if React build doesn't exist
+elif os.path.exists(os.path.join(DASHBOARD_DIR, "index.html")):
+    app.mount("/dashboard", StaticFiles(directory=DASHBOARD_DIR, html=True), name="dashboard-old")
+
+# API Info endpoint (accessible even when dashboard is served at root)
+@app.get("/api/info")
+async def root_api_info():
+    """API information and quick links."""
     has_keys = auth_manager.has_any_active_keys()
+    
+    # Determine dashboard URL
+    dashboard_url = None
+    if os.path.exists(DASHBOARD_DIST):
+        dashboard_url = "/"
+    elif os.path.exists(os.path.join(DASHBOARD_DIR, "index.html")):
+        dashboard_url = "/dashboard"
+    
     return {
         "name": "Security Hardening Agentless API",
         "version": "1.0.0",
         "description": "API for agentless security hardening audit and remediation",
+        "dashboard": dashboard_url,
         "authentication": {
             "required": True,
             "method": "API Key (X-API-Key header)",
@@ -82,7 +222,30 @@ async def root():
         }
     }
 
-@app.post("/audit/windows", dependencies=[RequireAuth])
+# Fallback: Root endpoint returns API info when dashboard not built
+if not os.path.exists(DASHBOARD_DIST):
+    @app.get("/", name="root_api_info_fallback")
+    async def root():
+        """Root endpoint - API information (fallback when dashboard not built)."""
+        return await root_api_info()
+
+async def require_admin(api_key: Optional[str] = Security(API_KEY_HEADER)) -> bool:
+    """Dependency để check admin role."""
+    if not api_key:
+        raise HTTPException(status_code=401, detail="API key required")
+    
+    if not auth_manager.verify_api_key(api_key):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    
+    user_info = auth_manager.get_api_key_user(api_key)
+    if not user_info or user_info.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    return True
+
+RequireAdmin = Depends(require_admin)
+
+@app.post("/audit/windows", dependencies=[RequireAdmin])
 async def audit_windows_winrm(
     host: str = Form(...),
     username: str = Form("Window"),
@@ -222,7 +385,7 @@ async def get_rules(os_name: Optional[str] = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/audit/linux", dependencies=[RequireAuth])
+@app.post("/audit/linux", dependencies=[RequireAdmin])
 async def audit_linux_json(
     Host: str = Form(...),
     Username: str = Form(""),
@@ -479,7 +642,7 @@ async def test_linux_connection(
         raise HTTPException(status_code=500, detail=f"Connection test failed: {str(e)}")
 
 # SỬA ENDPOINT REMEDIATION ĐỂ TỰ ĐỘNG TẠO BACKUP
-@app.post("/remediate/windows", dependencies=[RequireAuth])
+@app.post("/remediate/windows", dependencies=[RequireAdmin])
 async def remediate_windows(
     host: str = Form(...),
     username: str = Form("Window"),
@@ -507,7 +670,7 @@ async def remediate_windows(
         if create_backup:
             try:
                 print("🔍 Creating backup...")
-                backup_id = rollback_manager.create_backup(host, session)
+                backup_id = rollback_manager.create_backup(host, session, rule_id=None)  # Windows remediation không có rule_id cụ thể
                 if backup_id:
                     print(f"✅ Backup created: {backup_id}")
                 else:
@@ -594,7 +757,7 @@ async def remediate_windows(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=error_msg)
 
-@app.post("/rollback/windows", dependencies=[RequireAuth])
+@app.post("/rollback/windows", dependencies=[RequireAdmin])
 async def rollback_windows(
     host: str = Form(...),
     username: str = Form("Window"),  # SỬA: "Administrator" → "Window"
@@ -627,12 +790,19 @@ async def rollback_windows(
 
 @app.get("/backups/windows", dependencies=[RequireAuth])
 async def get_windows_backups(host: Optional[str] = None):
-    """Lấy danh sách backups Windows."""
+    """Lấy danh sách rule backups Windows (chỉ pre_remediation_backup)."""
     try:
         if host:
             backups = rollback_manager.get_backups(host)
         else:
-            backups = db.get_backups_not_linux(limit=50)
+            # Chỉ lấy rule backups, không lấy system backups
+            backups = list(db.backups.find(
+                {
+                    "os_type": {"$ne": "linux"},
+                    "type": "pre_remediation_backup"
+                },
+                sort=[("timestamp", -1)]
+            ).limit(50))
             for backup in backups:
                 backup["_id"] = str(backup["_id"])
         
@@ -640,7 +810,7 @@ async def get_windows_backups(host: Optional[str] = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/rollback/linux", dependencies=[RequireAuth])
+@app.post("/rollback/linux", dependencies=[RequireAdmin])
 async def rollback_linux(
     Host: str = Form(...),
     Username: str = Form(""),
@@ -672,12 +842,19 @@ async def rollback_linux(
 
 @app.get("/backups/linux", dependencies=[RequireAuth])
 async def get_linux_backups(host: Optional[str] = None):
-    """Lấy danh sách backups Linux."""
+    """Lấy danh sách rule backups Linux (chỉ pre_remediation_backup)."""
     try:
         if host:
             backups = linux_rollback_manager.get_backups(host)
         else:
-            backups = db.get_backups_by_os_type("linux", limit=50)
+            # Chỉ lấy rule backups, không lấy system backups
+            backups = list(db.backups.find(
+                {
+                    "os_type": "linux",
+                    "type": "pre_remediation_backup"
+                },
+                sort=[("timestamp", -1)]
+            ).limit(50))
             for backup in backups:
                 backup["_id"] = str(backup["_id"])
         
@@ -685,7 +862,227 @@ async def get_linux_backups(host: Optional[str] = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/remediate/linux", dependencies=[RequireAuth])
+@app.delete("/backups/{backup_id}", dependencies=[RequireAdmin])
+async def delete_backup(backup_id: str):
+    """Xóa một backup theo backup_id."""
+    try:
+        success = db.delete_backup(backup_id)
+        if success:
+            return {
+                "status": "success",
+                "message": f"Backup {backup_id} deleted successfully",
+                "backup_id": backup_id
+            }
+        else:
+            raise HTTPException(status_code=404, detail=f"Backup {backup_id} not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Failed to delete backup: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/backups/cleanup", dependencies=[RequireAdmin])
+async def cleanup_old_backups(days: int = 7):
+    """Xóa các backup cũ hơn số ngày chỉ định (mặc định 7 ngày)."""
+    try:
+        deleted_count = db.cleanup_old_backups(days=days)
+        return {
+            "status": "success",
+            "message": f"Cleaned up {deleted_count} backups older than {days} days",
+            "deleted_count": deleted_count,
+            "days": days
+        }
+    except Exception as e:
+        print(f"❌ Failed to cleanup old backups: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/backups/system/linux", dependencies=[RequireAdmin])
+async def create_system_backup_linux(
+    Host: str = Form(...),
+    Username: str = Form(""),
+    Password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+    Sudo_password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+    backup_ssh_config: Optional[str] = Form("true"),
+    backup_users_groups: Optional[str] = Form("true"),
+    backup_network_config: Optional[str] = Form("true"),
+    backup_security_config: Optional[str] = Form("true"),
+    backup_system_services: Optional[str] = Form("true"),
+    backup_firewall_config: Optional[str] = Form("true"),
+    backup_logging_config: Optional[str] = Form("true"),
+    backup_system_info: Optional[str] = Form("true"),
+):
+    """Create independent system backup for Linux - backup important system files."""
+    try:
+        backup_options = {
+            "ssh_config": backup_ssh_config.lower() == "true",
+            "users_groups": backup_users_groups.lower() == "true",
+            "network_config": backup_network_config.lower() == "true",
+            "security_config": backup_security_config.lower() == "true",
+            "system_services": backup_system_services.lower() == "true",
+            "firewall_config": backup_firewall_config.lower() == "true",
+            "logging_config": backup_logging_config.lower() == "true",
+            "system_info": backup_system_info.lower() == "true",
+        }
+        backup_id = system_backup_manager.create_linux_system_backup(
+            Host, Username, "", Password, Sudo_password, backup_options
+        )
+        if backup_id:
+            return {
+                "status": "success",
+                "message": f"System backup created successfully for {Host}",
+                "backup_id": backup_id,
+                "host": Host
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to create system backup")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ System backup failed: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/backups/system/windows", dependencies=[RequireAdmin])
+async def create_system_backup_windows(
+    host: str = Form(...),
+    username: str = Form("Administrator"),
+    password: str = Form(..., json_schema_extra={"format": "password"}),
+    backup_ssh_config: Optional[str] = Form("true"),  # Registry keys
+    backup_users_groups: Optional[str] = Form("true"),  # Security policies
+    backup_firewall_config: Optional[str] = Form("true"),
+    backup_system_info: Optional[str] = Form("true"),
+):
+    """Create independent system backup for Windows - backup important system configurations."""
+    try:
+        backup_options = {
+            "registry_keys": backup_ssh_config.lower() == "true",
+            "security_policies": backup_users_groups.lower() == "true",
+            "firewall_rules": backup_firewall_config.lower() == "true",
+            "system_info": backup_system_info.lower() == "true",
+        }
+        backup_id = system_backup_manager.create_windows_system_backup(
+            host, username, password, backup_options
+        )
+        if backup_id:
+            return {
+                "status": "success",
+                "message": f"System backup created successfully for {host}",
+                "backup_id": backup_id,
+                "host": host
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to create system backup")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ System backup failed: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/backups/system", dependencies=[RequireAuth])
+async def get_system_backups(host: Optional[str] = None, os_type: Optional[str] = None):
+    """Get system backups (not rule backups)."""
+    try:
+        query = {"type": "system_backup"}
+        if host:
+            query["host"] = host
+        if os_type:
+            query["os_type"] = os_type
+        
+        backups = list(db.backups.find(query).sort("timestamp", -1).limit(50))
+        for backup in backups:
+            backup["_id"] = str(backup["_id"])
+        
+        return {"total": len(backups), "backups": backups}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/backups/schedules", dependencies=[RequireAdmin])
+async def create_backup_schedule(
+    host: str = Form(...),
+    osType: str = Form(...),
+    username: str = Form(""),
+    key_path: Optional[str] = Form("~/.ssh/id_ed25519"),
+    password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+    sudo_password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+    scheduleType: str = Form(...),  # daily, weekly, monthly
+    time: str = Form(...),  # HH:MM format
+    enabled: bool = Form(True)
+):
+    """Create a scheduled system backup."""
+    try:
+        schedule_data = {
+            "host": host,
+            "osType": osType,
+            "username": username,
+            "key_path": key_path,
+            "password": password,
+            "sudo_password": sudo_password,
+            "scheduleType": scheduleType,
+            "time": time,
+            "enabled": enabled
+        }
+        schedule_id = db.save_backup_schedule(schedule_data)
+        return {
+            "status": "success",
+            "message": "Backup schedule created successfully",
+            "schedule_id": schedule_id
+        }
+    except Exception as e:
+        print(f"❌ Failed to create schedule: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/backups/schedules", dependencies=[RequireAuth])
+async def get_backup_schedules():
+    """Get all backup schedules."""
+    try:
+        schedules = db.get_backup_schedules()
+        return {"total": len(schedules), "schedules": schedules}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/backups/schedules/{schedule_id}", dependencies=[RequireAdmin])
+async def delete_backup_schedule(schedule_id: str):
+    """Delete a backup schedule."""
+    try:
+        success = db.delete_backup_schedule(schedule_id)
+        if success:
+            return {"status": "success", "message": "Schedule deleted successfully"}
+        else:
+            raise HTTPException(status_code=404, detail="Schedule not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.patch("/backups/schedules/{schedule_id}", dependencies=[RequireAdmin])
+async def update_backup_schedule(
+    schedule_id: str,
+    enabled: Optional[bool] = Form(None)
+):
+    """Update a backup schedule."""
+    try:
+        update_data = {}
+        if enabled is not None:
+            update_data["enabled"] = enabled
+        
+        if not update_data:
+            raise HTTPException(status_code=400, detail="No update data provided")
+        
+        success = db.update_backup_schedule(schedule_id, update_data)
+        if success:
+            return {"status": "success", "message": "Schedule updated successfully"}
+        else:
+            raise HTTPException(status_code=404, detail="Schedule not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/remediate/linux", dependencies=[RequireAdmin])
 async def remediate_linux(
     Host: str = Form(...),
     Username: str = Form(""),
@@ -730,7 +1127,7 @@ async def remediate_linux(
             try:
                 print("🔍 Creating backup...")
                 backup_id = linux_rollback_manager.create_backup(
-                    Host, Username, Key_path or "", Password, Sudo_password
+                    Host, Username, Key_path or "", Password, Sudo_password, rule_id=Rule_id
                 )
                 if backup_id:
                     print(f"✅ Backup created: {backup_id}")
@@ -832,7 +1229,6 @@ async def remediate_linux(
                 print("⚠️ No check command found in rule for verification")
         except Exception as verify_error:
             print(f"❌ Verification check failed: {verify_error}")
-            import traceback
             traceback.print_exc()
         
         # Chuẩn bị dữ liệu remediation để lưu vào MongoDB
@@ -962,6 +1358,37 @@ async def get_remediation_reports(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/remediations/bulk-delete", dependencies=[RequireAdmin])
+async def bulk_delete_remediations(ids: List[str]):
+    """Xóa nhiều remediation logs theo danh sách IDs."""
+    try:
+        if not ids or len(ids) == 0:
+            raise HTTPException(status_code=400, detail="No IDs provided")
+        
+        deleted_count = db.bulk_delete_remediations(ids)
+        return {
+            "status": "success",
+            "message": f"Deleted {deleted_count} remediation(s)",
+            "deleted_count": deleted_count
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/database/clear-data", dependencies=[RequireAdmin])
+async def clear_all_data():
+    """Xóa tất cả dữ liệu audit, remediation, backup, schedules. Giữ lại users và api_keys."""
+    try:
+        deleted_counts = db.clear_all_data()
+        return {
+            "status": "success",
+            "message": "All data cleared successfully",
+            "deleted_counts": deleted_counts
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/reports/hosts", dependencies=[RequireAuth])
 async def get_hosts_overview():
     """
@@ -1016,7 +1443,169 @@ async def get_audit_detail(audit_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ==================== AUTHENTICATION ENDPOINTS ====================
+# ==================== USER AUTHENTICATION ENDPOINTS ====================
+
+@app.post("/auth/users/register")
+async def register_user(
+    username: str = Form(...),
+    password: str = Form(..., json_schema_extra={"format": "password"}),
+    email: str = Form(""),
+):
+    """Đăng ký user mới. Chỉ cho phép khi chưa có user nào (first user sẽ là admin)."""
+    try:
+        # Chỉ cho phép đăng ký khi chưa có user nào
+        if user_manager.has_any_users():
+            raise HTTPException(
+                status_code=403, 
+                detail="Registration is only allowed for the first user. Please contact an admin to create new users."
+            )
+        
+        # First user is always admin
+        role = "admin"
+        
+        # Create user
+        user = user_manager.create_user(username, password, email, role)
+        return {
+            "status": "success",
+            "message": "User created successfully",
+            "user": user
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/auth/users", dependencies=[RequireAdmin])
+async def list_users():
+    """Lấy danh sách users. Admin only."""
+    try:
+        users = user_manager.list_users()
+        return {"total": len(users), "users": users}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/auth/users/create", dependencies=[RequireAdmin])
+async def create_user_by_admin(
+    username: str = Form(...),
+    password: str = Form(..., json_schema_extra={"format": "password"}),
+    email: str = Form(""),
+):
+    """Admin tạo user mới. Không cần API key trong parameter, check qua RequireAdmin dependency."""
+    try:
+        # Force role to be 'user' (không cho phép tạo admin)
+        role = "user"
+        
+        # Create user
+        user = user_manager.create_user(username, password, email, role)
+        return {
+            "status": "success",
+            "message": "User created successfully",
+            "user": user
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/auth/users/{username}", dependencies=[RequireAdmin])
+async def update_user(
+    username: str,
+    email: Optional[str] = Form(None),
+    password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+):
+    """Cập nhật thông tin user (email, password). Admin only."""
+    try:
+        user = user_manager.update_user(username, email=email, password=password)
+        return {
+            "status": "success",
+            "message": "User updated successfully",
+            "user": user
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/auth/users/{username}", dependencies=[RequireAdmin])
+async def delete_user(username: str):
+    """Xóa user (soft delete). Admin only."""
+    try:
+        user_manager.delete_user(username)
+        return {
+            "status": "success",
+            "message": "User deleted successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.patch("/auth/users/{username}/role", dependencies=[RequireAdmin])
+async def change_user_role(
+    username: str,
+    role: str = Form(...),
+):
+    """Thay đổi role của user. Admin only. Không cho phép tạo thêm admin."""
+    try:
+        if role not in ["admin", "user"]:
+            raise HTTPException(status_code=400, detail="Invalid role. Must be 'admin' or 'user'")
+        
+        user = user_manager.change_role(username, role)
+        return {
+            "status": "success",
+            "message": "User role updated successfully",
+            "user": user
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/auth/users/login")
+async def login_user(
+    username: str = Form(...),
+    password: str = Form(..., json_schema_extra={"format": "password"}),
+):
+    """Đăng nhập user và trả về API key tạm thời."""
+    try:
+        if not user_manager.verify_user(username, password):
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid username or password"
+            )
+        
+        # Tạo API key tạm thời cho user này (hoặc có thể dùng JWT token)
+        # Ở đây tạm thời tạo API key với tên user
+        api_key_data = auth_manager.generate_api_key(
+            name=f"User: {username}",
+            description=f"Temporary API key for {username}",
+            expires_days=30
+        )
+        
+        user_info = user_manager.get_user(username)
+        
+        return {
+            "status": "success",
+            "message": "Login successful",
+            "api_key": api_key_data["api_key"],
+            "user": user_info,
+            "expires_at": api_key_data["expires_at"]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/auth/users/me", dependencies=[RequireAuth])
+async def get_current_user():
+    """Lấy thông tin user hiện tại (cần API key)."""
+    # Note: Cần implement logic để map API key với user
+    # Tạm thời trả về thông tin cơ bản
+    return {
+        "message": "User info endpoint - to be implemented with API key to user mapping"
+    }
+
+# ==================== API KEY AUTHENTICATION ENDPOINTS ====================
 
 @app.post("/auth/setup")
 async def setup_first_api_key(
@@ -1142,3 +1731,44 @@ async def reset_all_api_keys(
 async def version():
     """Version endpoint."""
     return {"name": "security_hardening", "api": "v1"}
+
+# ==================== DASHBOARD ROUTES (Must be last to avoid conflicts) ====================
+
+# Serve React dashboard at root (only if built)
+# This must be registered AFTER all API routes
+if DASHBOARD_BUILT:
+    @app.get("/", name="serve_dashboard_root")
+    async def serve_dashboard_root():
+        """Serve React dashboard at root."""
+        index_path = os.path.join(DASHBOARD_DIST, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        # Fallback to API info if index.html not found
+        return await root_api_info()
+    
+    # Serve dashboard at /dashboard as well for backward compatibility
+    @app.get("/dashboard", name="serve_dashboard_base")
+    @app.get("/dashboard/{path:path}", name="serve_dashboard_path")
+    async def serve_dashboard_route(path: str = ""):
+        """Serve React dashboard at /dashboard route (for SPA routing)."""
+        index_path = os.path.join(DASHBOARD_DIST, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        return await root_api_info()
+    
+    # Catch-all for React Router (must be last route)
+    # This handles all non-API routes like /hosts, /audits, etc.
+    @app.get("/{path:path}", name="serve_dashboard_spa")
+    async def serve_dashboard_spa(path: str):
+        """Catch-all route for React SPA routing (handles /hosts, /audits, etc.)."""
+        # Skip if it's an API route or static file
+        if path.startswith(("api/", "docs", "redoc", "openapi.json", "healthz", "version", 
+                           "audit/", "remediate/", "rollback/", "reports/", "auth/", 
+                           "backups/", "rules", "test/", "assets/")):
+            raise HTTPException(status_code=404, detail="Not found")
+        
+        # Serve React dashboard for all other routes
+        index_path = os.path.join(DASHBOARD_DIST, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        raise HTTPException(status_code=404, detail="Dashboard not found")

@@ -13,8 +13,8 @@ class RollbackManager:
     def __init__(self):
         self.db = db
     
-    def create_backup(self, host: str, session: winrm.Session) -> str:
-        """Tạo backup trạng thái hiện tại trước khi remediation."""
+    def create_backup(self, host: str, session: winrm.Session, rule_id: Optional[str] = None) -> str:
+        """Tạo backup trạng thái hiện tại trước khi remediation - chỉ backup những gì rule sẽ sửa."""
         try:
             print(f"🛡️ Starting backup for {host}")
             
@@ -29,80 +29,89 @@ class RollbackManager:
                 "type": "pre_remediation_backup",
                 "os_type": "windows",
                 "backup_id": f"backup_{int(datetime.utcnow().timestamp())}",
+                "rule_id": rule_id,  # Lưu rule_id để biết backup này dành cho rule nào
                 "data": {}
             }
             
-            # 1. Backup Password Policy (CHỈ ĐỌC, KHÔNG THAY ĐỔI)
-            # WinRM có timeout mặc định ~30s, các commands này thường nhanh (<5s)
-            try:
-                print("🔍 Backing up password policy...")
-                net_result = session.run_cmd('net accounts')
-                if net_result.status_code == 0:
-                    net_output = net_result.std_out.decode().strip()
-                    backup_data["data"]["password_policy"] = self._parse_net_accounts(net_output)
-                    print(f"   ✓ Password policy backed up")
-                else:
-                    print(f"   ⚠️ Failed to get password policy (skipped)")
-            except Exception as e:
-                print(f"   ⚠️ Error backing up password policy (skipped): {e}")
+            # Xác định policies cần backup dựa vào rule_id
+            policies_to_backup = self._get_policies_to_backup_for_rule(rule_id)
             
-            # 2. Backup Remote Assistance
-            try:
-                print("🔍 Backing up remote assistance setting...")
-                reg_result = session.run_cmd('reg query "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Remote Assistance" /v fAllowToGetHelp')
-                if reg_result.status_code == 0:
-                    reg_output = reg_result.std_out.decode().strip()
-                    if "0x0" in reg_output:
-                        backup_data["data"]["remote_assistance"] = 0
+            # 1. Backup Password Policy nếu rule sẽ sửa
+            if "password" in policies_to_backup or not rule_id:
+                # WinRM có timeout mặc định ~30s, các commands này thường nhanh (<5s)
+                try:
+                    print("🔍 Backing up password policy...")
+                    net_result = session.run_cmd('net accounts')
+                    if net_result.status_code == 0:
+                        net_output = net_result.std_out.decode().strip()
+                        backup_data["data"]["password_policy"] = self._parse_net_accounts(net_output)
+                        print(f"   ✓ Password policy backed up")
+                    else:
+                        print(f"   ⚠️ Failed to get password policy (skipped)")
+                except Exception as e:
+                    print(f"   ⚠️ Error backing up password policy (skipped): {e}")
+            
+            # 2. Backup Remote Assistance nếu rule sẽ sửa
+            if "remote_assistance" in policies_to_backup or not rule_id:
+                try:
+                    print("🔍 Backing up remote assistance setting...")
+                    reg_result = session.run_cmd('reg query "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Remote Assistance" /v fAllowToGetHelp')
+                    if reg_result.status_code == 0:
+                        reg_output = reg_result.std_out.decode().strip()
+                        if "0x0" in reg_output:
+                            backup_data["data"]["remote_assistance"] = 0
+                        else:
+                            backup_data["data"]["remote_assistance"] = 1
+                        print(f"   ✓ Remote assistance backed up")
                     else:
                         backup_data["data"]["remote_assistance"] = 1
-                    print(f"   ✓ Remote assistance backed up")
-                else:
+                        print(f"   ⚠️ Failed to get remote assistance (using default)")
+                except Exception as e:
+                    print(f"   ⚠️ Error backing up remote assistance (using default): {e}")
                     backup_data["data"]["remote_assistance"] = 1
-                    print(f"   ⚠️ Failed to get remote assistance (using default)")
-            except Exception as e:
-                print(f"   ⚠️ Error backing up remote assistance (using default): {e}")
-                backup_data["data"]["remote_assistance"] = 1
             
-            # 3. Backup Administrator Account Status
-            try:
-                print("🔍 Backing up administrator account status...")
-                admin_result = session.run_cmd('net user Administrator')
-                if admin_result.status_code == 0:
-                    admin_output = admin_result.std_out.decode().strip()
-                    if "Account active" in admin_output and "Yes" in admin_output:
-                        backup_data["data"]["admin_account_active"] = True
+            # 3. Backup Administrator Account Status nếu rule sẽ sửa
+            if "admin_account" in policies_to_backup or not rule_id:
+                try:
+                    print("🔍 Backing up administrator account status...")
+                    admin_result = session.run_cmd('net user Administrator')
+                    if admin_result.status_code == 0:
+                        admin_output = admin_result.std_out.decode().strip()
+                        if "Account active" in admin_output and "Yes" in admin_output:
+                            backup_data["data"]["admin_account_active"] = True
+                        else:
+                            backup_data["data"]["admin_account_active"] = False
+                        print(f"   ✓ Administrator account status backed up")
                     else:
-                        backup_data["data"]["admin_account_active"] = False
-                    print(f"   ✓ Administrator account status backed up")
-                else:
+                        backup_data["data"]["admin_account_active"] = True
+                        print(f"   ⚠️ Failed to get admin status (using default)")
+                except Exception as e:
+                    print(f"   ⚠️ Error backing up admin account (using default): {e}")
                     backup_data["data"]["admin_account_active"] = True
-                    print(f"   ⚠️ Failed to get admin status (using default)")
-            except Exception as e:
-                print(f"   ⚠️ Error backing up admin account (using default): {e}")
-                backup_data["data"]["admin_account_active"] = True
             
-            # 4. Backup Audit Policy
-            try:
-                print("🔍 Backing up audit policy...")
-                audit_result = session.run_cmd('auditpol /get /subcategory:"Logon"')
-                if audit_result.status_code == 0:
-                    audit_output = audit_result.std_out.decode().strip()
-                    backup_data["data"]["audit_logon"] = self._parse_audit_policy(audit_output)
-                    print(f"   ✓ Audit policy backed up")
-                else:
+            # 4. Backup Audit Policy nếu rule sẽ sửa
+            if "audit_policy" in policies_to_backup or not rule_id:
+                try:
+                    print("🔍 Backing up audit policy...")
+                    audit_result = session.run_cmd('auditpol /get /subcategory:"Logon"')
+                    if audit_result.status_code == 0:
+                        audit_output = audit_result.std_out.decode().strip()
+                        backup_data["data"]["audit_logon"] = self._parse_audit_policy(audit_output)
+                        print(f"   ✓ Audit policy backed up")
+                    else:
+                        backup_data["data"]["audit_logon"] = {"success": "No Auditing", "failure": "No Auditing"}
+                        print(f"   ⚠️ Failed to get audit policy (using default)")
+                except Exception as e:
+                    print(f"   ⚠️ Error backing up audit policy (using default): {e}")
                     backup_data["data"]["audit_logon"] = {"success": "No Auditing", "failure": "No Auditing"}
-                    print(f"   ⚠️ Failed to get audit policy (using default)")
-            except Exception as e:
-                print(f"   ⚠️ Error backing up audit policy (using default): {e}")
-                backup_data["data"]["audit_logon"] = {"success": "No Auditing", "failure": "No Auditing"}
             
             # Thêm thông tin cơ bản về backup
             backup_data["data"]["backup_info"] = {
                 "backup_time": str(datetime.utcnow()),
                 "host": host,
-                "notes": "Backup created before remediation - Only security policy settings",
-                "backup_scope": "Limited - Security policies only (NOT full system backup)"
+                "rule_id": rule_id,
+                "notes": f"Backup created before remediation for rule {rule_id} - Only policies that will be modified",
+                "backup_scope": f"Rule-specific backup for {rule_id} - Only policies/configs that remediation will modify"
             }
             
             # Save to MongoDB
@@ -155,6 +164,36 @@ class RollbackManager:
             pass
         
         return settings
+    
+    def _get_policies_to_backup_for_rule(self, rule_id: Optional[str]) -> List[str]:
+        """Xác định các policies cần backup dựa vào rule_id."""
+        if not rule_id:
+            # Fallback: backup tất cả nếu không có rule_id
+            return ["password", "remote_assistance", "admin_account", "audit_policy"]
+        
+        policies = []
+        
+        # Rule về password policy
+        if any(x in rule_id.lower() for x in ['password', 'account', 'lockout']):
+            policies.append("password")
+        
+        # Rule về remote access
+        if any(x in rule_id.lower() for x in ['remote', 'assistance', 'rdp']):
+            policies.append("remote_assistance")
+        
+        # Rule về admin account
+        if any(x in rule_id.lower() for x in ['admin', 'administrator']):
+            policies.append("admin_account")
+        
+        # Rule về audit/logging
+        if any(x in rule_id.lower() for x in ['audit', 'logging', 'logon']):
+            policies.append("audit_policy")
+        
+        # Nếu không tìm thấy, backup password policy (phổ biến nhất)
+        if not policies:
+            policies.append("password")
+        
+        return policies
     
     def _save_backup(self, backup_data: Dict) -> str:
         """Lưu backup vào MongoDB."""
@@ -285,9 +324,15 @@ class RollbackManager:
             print(f"⚠️ Failed to update remediation status: {e}")
     
     def get_backups(self, host: str) -> list:
-        """Lấy danh sách backups cho một host."""
+        """Lấy danh sách rule backups cho một Windows host (chỉ pre_remediation_backup)."""
         try:
-            backups = list(self.db.backups.find({"host": host}, sort=[("timestamp", -1)]))
+            backups = list(self.db.backups.find(
+                {
+                    "host": host,
+                    "type": "pre_remediation_backup"  # Chỉ lấy rule backups
+                },
+                sort=[("timestamp", -1)]
+            ))
             for backup in backups:
                 backup["_id"] = str(backup["_id"])
             return backups

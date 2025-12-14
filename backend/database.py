@@ -19,6 +19,7 @@ class AuditDB:
             self.audits = self.db["audit_reports"]
             self.remediations = self.db["remediation_logs"] 
             self.backups = self.db["system_backups"]  # THÊM COLLECTION BACKUPS
+            self.backup_schedules = self.db["backup_schedules"]  # Scheduled backups
             
             # Kiểm tra collections
             print(f"✅ Collections: {self.db.list_collection_names()}")
@@ -150,6 +151,142 @@ class AuditDB:
     def get_backups_not_linux(self, limit: int = 50) -> List[Dict]:
         """Lấy danh sách backups không phải Linux (Windows)"""
         return list(self.backups.find({"os_type": {"$ne": "linux"}}, sort=[("timestamp", -1)]).limit(limit))
+    
+    def delete_backup(self, backup_id: str) -> bool:
+        """Xóa một backup theo backup_id."""
+        try:
+            result = self.backups.delete_one({"backup_id": backup_id})
+            if result.deleted_count > 0:
+                print(f"✅ Backup deleted: {backup_id}")
+                return True
+            else:
+                # Thử xóa bằng _id nếu không tìm thấy bằng backup_id
+                result = self.backups.delete_one({"_id": backup_id})
+                if result.deleted_count > 0:
+                    print(f"✅ Backup deleted by _id: {backup_id}")
+                    return True
+                print(f"⚠️ Backup not found: {backup_id}")
+                return False
+        except Exception as e:
+            print(f"❌ Failed to delete backup: {e}")
+            raise
+    
+    def cleanup_old_backups(self, days: int = 7) -> int:
+        """Xóa các backup cũ hơn số ngày chỉ định (mặc định 7 ngày). Chỉ xóa rule backups, không xóa system backups."""
+        try:
+            from datetime import timedelta
+            cutoff_date = datetime.utcnow() - timedelta(days=days)
+            
+            # Chỉ xóa rule backups (pre_remediation_backup), không xóa system_backup
+            query = {
+                "type": "pre_remediation_backup",
+                "$or": [
+                    {"timestamp": {"$lt": cutoff_date}},
+                    {"created_at": {"$lt": cutoff_date}}
+                ]
+            }
+            
+            result = self.backups.delete_many(query)
+            deleted_count = result.deleted_count
+            print(f"✅ Cleaned up {deleted_count} rule backups older than {days} days")
+            return deleted_count
+        except Exception as e:
+            print(f"❌ Failed to cleanup old backups: {e}")
+            raise
+    
+    def save_backup_schedule(self, schedule_data: Dict) -> str:
+        """Lưu scheduled backup vào MongoDB."""
+        try:
+            schedule_id = str(uuid.uuid4())
+            schedule_data["_id"] = schedule_id
+            schedule_data["schedule_id"] = schedule_id
+            schedule_data["created_at"] = datetime.utcnow()
+            
+            self.backup_schedules.insert_one(schedule_data)
+            print(f"✅ Backup schedule saved: {schedule_id}")
+            return schedule_id
+        except Exception as e:
+            print(f"❌ Failed to save backup schedule: {e}")
+            raise
+    
+    def get_backup_schedules(self) -> List[Dict]:
+        """Lấy danh sách scheduled backups."""
+        try:
+            schedules = list(self.backup_schedules.find({}).sort("created_at", -1))
+            for schedule in schedules:
+                schedule["_id"] = str(schedule["_id"])
+            return schedules
+        except Exception as e:
+            print(f"❌ Failed to get backup schedules: {e}")
+            return []
+    
+    def delete_backup_schedule(self, schedule_id: str) -> bool:
+        """Xóa scheduled backup."""
+        try:
+            result = self.backup_schedules.delete_one({"_id": schedule_id})
+            if result.deleted_count > 0:
+                print(f"✅ Schedule deleted: {schedule_id}")
+                return True
+            return False
+        except Exception as e:
+            print(f"❌ Failed to delete schedule: {e}")
+            raise
+    
+    def update_backup_schedule(self, schedule_id: str, update_data: Dict) -> bool:
+        """Cập nhật scheduled backup."""
+        try:
+            result = self.backup_schedules.update_one(
+                {"_id": schedule_id},
+                {"$set": update_data}
+            )
+            return result.modified_count > 0
+        except Exception as e:
+            print(f"❌ Failed to update schedule: {e}")
+            raise
+    
+    def bulk_delete_remediations(self, remediation_ids: List[str]) -> int:
+        """Xóa nhiều remediation logs theo danh sách IDs."""
+        try:
+            # Try to find by remediation_id first, then _id
+            result = self.remediations.delete_many({
+                "$or": [
+                    {"remediation_id": {"$in": remediation_ids}},
+                    {"_id": {"$in": remediation_ids}}
+                ]
+            })
+            deleted_count = result.deleted_count
+            print(f"✅ Deleted {deleted_count} remediation(s)")
+            return deleted_count
+        except Exception as e:
+            print(f"❌ Failed to bulk delete remediations: {e}")
+            raise
+    
+    def clear_all_data(self) -> Dict:
+        """Xóa tất cả dữ liệu audit, remediation, backup, schedules. Giữ lại users và api_keys."""
+        try:
+            deleted_counts = {}
+            
+            # Delete audit reports
+            audit_result = self.audits.delete_many({})
+            deleted_counts["audit_reports"] = audit_result.deleted_count
+            
+            # Delete remediation logs
+            remediation_result = self.remediations.delete_many({})
+            deleted_counts["remediation_logs"] = remediation_result.deleted_count
+            
+            # Delete backups (both rule backups and system backups)
+            backup_result = self.backups.delete_many({})
+            deleted_counts["backups"] = backup_result.deleted_count
+            
+            # Delete backup schedules
+            schedule_result = self.backup_schedules.delete_many({})
+            deleted_counts["backup_schedules"] = schedule_result.deleted_count
+            
+            print(f"✅ Cleared all data: {deleted_counts}")
+            return deleted_counts
+        except Exception as e:
+            print(f"❌ Failed to clear data: {e}")
+            raise
 
 # Kết nối đến MongoDB Docker container
 db = AuditDB()
