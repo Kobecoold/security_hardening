@@ -74,12 +74,16 @@ class RollbackManager:
                                     reg_key_backup["value_type"] = "REG_SZ"
                                     reg_key_backup["value_data"] = parts[1].strip()
                             
-                            backup_key = f"registry_{reg_path.replace('\\', '_').replace(':', '')}_{value_name}"
+                            # Create backup key - cannot use backslash in f-string expression
+                            reg_path_normalized = reg_path.replace('\\', '_').replace(':', '')
+                            backup_key = f"registry_{reg_path_normalized}_{value_name}"
                             backup_data["data"][backup_key] = reg_key_backup
                             print(f"   ✓ Registry key backed up: {reg_path}\\{value_name}")
                         else:
                             # Key might not exist, backup that info
-                            backup_key = f"registry_{reg_path.replace('\\', '_').replace(':', '')}_{value_name}"
+                            # Create backup key - cannot use backslash in f-string expression
+                            reg_path_normalized = reg_path.replace('\\', '_').replace(':', '')
+                            backup_key = f"registry_{reg_path_normalized}_{value_name}"
                             backup_data["data"][backup_key] = {
                                 "path": reg_path,
                                 "value_name": value_name,
