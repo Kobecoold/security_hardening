@@ -1,0 +1,14 @@
+id: winrm-cis-windows10-17.1.1
+os: windows-10
+title: Ensure 'Audit Credential Validation' is set to 'Success and Failure'
+benchmark: CIS Microsoft Windows 10 Enterprise Benchmark v4.0.0
+level: 1
+description: Ghi lại cả thành công và thất bại xác thực thông tin đăng nhập.
+needs_sudo: false
+check:
+  winrm: auditpol /get /subcategory:"Credential Validation" 
+  expected: "Success and Failure"
+references:
+  - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
+controls:
+  - CIS 17.1.1
