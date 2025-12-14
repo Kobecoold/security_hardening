@@ -25,7 +25,7 @@ export default function RemediationForm() {
 
   const [formData, setFormData] = useState({
     host: host || '',
-    os_type: osType || 'linux',
+    os_type: osType || '',  // Empty by default - user must select OS type
     rule_ids: [], // Multi-select rules
     username: '',
     key_path: '',
@@ -54,7 +54,7 @@ export default function RemediationForm() {
     
     // Check OS type
     const isWindowsOS = osTypeLower.startsWith('windows')
-    const isLinuxOS = osTypeLower === 'linux' || osTypeLower.startsWith('ubuntu') || osTypeLower.startsWith('debian')
+    const isLinuxOS = osTypeLower.startsWith('ubuntu') || osTypeLower.startsWith('debian')
     
     // Match rule to OS
     if (isWindowsOS && isWindowsRule) return true
@@ -116,10 +116,16 @@ export default function RemediationForm() {
       }))
       
       setFailedRules(failedRulesFormatted)
+      
+      // Auto-detect and update OS type from audit
+      if (audit.os_type && audit.os_type !== formData.os_type) {
+        console.log(`Auto-detected OS type from audit: ${audit.os_type} (was: ${formData.os_type})`)
+      }
+      
       setFormData(prev => ({
         ...prev,
         host: audit.host || prev.host,
-        os_type: audit.os_type || prev.os_type
+        os_type: audit.os_type || prev.os_type  // Always use OS type from audit if available
       }))
     } catch (err) {
       console.error('Error loading audit:', err)
@@ -146,8 +152,17 @@ export default function RemediationForm() {
       
       const latestAudit = audits[0]
       
-      // Get OS type from audit or form
+      // Auto-detect OS type from audit if available, otherwise use form value
       const auditOSType = latestAudit.os_type || formData.os_type
+      
+      // Update form OS type if audit has different OS type (auto-detect)
+      if (latestAudit.os_type && latestAudit.os_type !== formData.os_type) {
+        console.log(`Auto-detected OS type from audit: ${latestAudit.os_type} (was: ${formData.os_type})`)
+        setFormData(prev => ({
+          ...prev,
+          os_type: latestAudit.os_type
+        }))
+      }
       
       // Filter failed rules AND filter by OS type
       const failed = (latestAudit.results || []).filter(r => {
@@ -177,7 +192,7 @@ export default function RemediationForm() {
       setFailedRules(failedRulesFormatted)
       
       if (failedRulesFormatted.length === 0) {
-        setError(`No failed rules found in the latest audit for ${formData.host} matching OS type "${formData.os_type}". All rules are passing or no rules match the selected OS type!`)
+        setError(`No failed rules found in the latest audit for ${formData.host} matching OS type "${auditOSType}". All rules are passing or no rules match the detected OS type!`)
       }
     } catch (err) {
       console.error('Error loading latest audit:', err)
@@ -257,7 +272,7 @@ export default function RemediationForm() {
         return
       }
 
-      if (formData.os_type === 'linux' || formData.os_type.startsWith('ubuntu') || formData.os_type.startsWith('debian')) {
+      if (formData.os_type.startsWith('ubuntu') || formData.os_type.startsWith('debian')) {
         // Linux remediation - run for each selected rule
         const validRuleIds = formData.rule_ids.filter(id => id && id.trim() !== '')
         
@@ -339,8 +354,7 @@ export default function RemediationForm() {
     }
   }
 
-  const isLinux = formData.os_type === 'linux' || 
-                  formData.os_type?.startsWith('ubuntu') || 
+  const isLinux = formData.os_type?.startsWith('ubuntu') || 
                   formData.os_type?.startsWith('debian')
 
   return (
@@ -371,7 +385,7 @@ export default function RemediationForm() {
             </div>
 
             <div className="form-group">
-              <label htmlFor="os_type">OS Type</label>
+              <label htmlFor="os_type">OS Type *</label>
               <select
                 id="os_type"
                 name="os_type"
@@ -379,7 +393,7 @@ export default function RemediationForm() {
                 onChange={handleChange}
                 required
               >
-                <option value="linux">Linux</option>
+                <option value="">-- Select OS Type --</option>
                 <option value="ubuntu-20.04">Ubuntu 20.04</option>
                 <option value="ubuntu-22.04">Ubuntu 22.04</option>
                 <option value="debian-12">Debian 12</option>
