@@ -384,10 +384,15 @@
   position: relative;
 }
 
+.remediation-card {
+  position: relative;
+  padding-left: 50px; /* Space for checkbox */
+}
+
 .remediation-checkbox {
   position: absolute;
   top: 20px;
-  right: 20px;
+  left: 20px;
   z-index: 10;
 }
 

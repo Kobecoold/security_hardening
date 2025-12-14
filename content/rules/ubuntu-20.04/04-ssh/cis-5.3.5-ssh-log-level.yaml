@@ -7,7 +7,34 @@ description: Ensure LogLevel is set to INFO or VERBOSE in /etc/ssh/sshd_config
 needs_sudo: false
 check:
   bash: |
-    sshd -T 2>/dev/null | grep -i '^loglevel' | grep -qE '^(INFO|VERBOSE)$'
+    # Method 1: Check running SSH daemon config
+    if command -v sshd >/dev/null 2>&1; then
+      loglevel=$(sshd -T 2>/dev/null | grep -iE '^loglevel' | awk '{print $2}' | head -1)
+      if [ -n "$loglevel" ] && echo "$loglevel" | grep -qiE '^(INFO|VERBOSE)$'; then
+        exit 0
+      fi
+    fi
+    
+    # Method 2: Check main config file
+    if [ -r /etc/ssh/sshd_config ]; then
+      loglevel=$(grep -iE '^[[:space:]]*LogLevel[[:space:]]+' /etc/ssh/sshd_config | awk '{print $2}' | head -1)
+      if [ -n "$loglevel" ] && echo "$loglevel" | grep -qiE '^(INFO|VERBOSE)$'; then
+        exit 0
+      fi
+    fi
+    
+    # Method 3: Check config.d directory
+    if [ -d /etc/ssh/sshd_config.d ] && [ -r /etc/ssh/sshd_config.d ]; then
+      for f in /etc/ssh/sshd_config.d/*.conf; do
+        [ -f "$f" ] && [ -r "$f" ] || continue
+        loglevel=$(grep -iE '^[[:space:]]*LogLevel[[:space:]]+' "$f" | awk '{print $2}' | head -1)
+        if [ -n "$loglevel" ] && echo "$loglevel" | grep -qiE '^(INFO|VERBOSE)$'; then
+          exit 0
+        fi
+      done
+    fi
+    
+    exit 1
 references:
   - https://ubuntu.com/security/cis
 controls:

@@ -7,7 +7,34 @@ description: Set the SSH MaxAuthTries to 4 or less
 needs_sudo: false
 check:
   bash: |
-    sshd -T 2>/dev/null | grep -i '^maxauthtries' | grep -qE '^([1-4]|4)$'
+    # Method 1: Check running SSH daemon config
+    if command -v sshd >/dev/null 2>&1; then
+      max_tries=$(sshd -T 2>/dev/null | grep -iE '^maxauthtries' | awk '{print $2}' | head -1)
+      if [ -n "$max_tries" ] && [ "$max_tries" -le 4 ] && [ "$max_tries" -ge 1 ] 2>/dev/null; then
+        exit 0
+      fi
+    fi
+    
+    # Method 2: Check main config file
+    if [ -r /etc/ssh/sshd_config ]; then
+      max_tries=$(grep -iE '^[[:space:]]*MaxAuthTries[[:space:]]+' /etc/ssh/sshd_config | awk '{print $2}' | head -1)
+      if [ -n "$max_tries" ] && [ "$max_tries" -le 4 ] && [ "$max_tries" -ge 1 ] 2>/dev/null; then
+        exit 0
+      fi
+    fi
+    
+    # Method 3: Check config.d directory
+    if [ -d /etc/ssh/sshd_config.d ] && [ -r /etc/ssh/sshd_config.d ]; then
+      for f in /etc/ssh/sshd_config.d/*.conf; do
+        [ -f "$f" ] && [ -r "$f" ] || continue
+        max_tries=$(grep -iE '^[[:space:]]*MaxAuthTries[[:space:]]+' "$f" | awk '{print $2}' | head -1)
+        if [ -n "$max_tries" ] && [ "$max_tries" -le 4 ] && [ "$max_tries" -ge 1 ] 2>/dev/null; then
+          exit 0
+        fi
+      done
+    fi
+    
+    exit 1
 references:
   - https://ubuntu.com/security/cis
 controls:
