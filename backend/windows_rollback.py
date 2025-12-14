@@ -5,7 +5,10 @@ from typing import Dict, Optional, List, Any
 import winrm
 from database import db
 from windows_audit import winrm_connect
+from utils import load_rules, RULES_DIR
 import re
+import os
+import yaml
 
 class RollbackManager:
     """Quản lý rollback cho Windows."""
@@ -33,8 +36,59 @@ class RollbackManager:
                 "data": {}
             }
             
-            # Xác định policies cần backup dựa vào rule_id
-            policies_to_backup = self._get_policies_to_backup_for_rule(rule_id)
+            # Xác định policies và registry keys cần backup dựa vào rule_id
+            backup_scope = self._get_policies_to_backup_for_rule(rule_id)
+            policies_to_backup = backup_scope.get("policies", [])
+            registry_keys_to_backup = backup_scope.get("registry_keys", [])
+            
+            # Backup registry keys nếu có
+            if registry_keys_to_backup:
+                for reg_key in registry_keys_to_backup:
+                    try:
+                        reg_path = reg_key["path"]
+                        value_name = reg_key["value_name"]
+                        print(f"🔍 Backing up registry key: {reg_path}\\{value_name}...")
+                        
+                        reg_result = session.run_cmd(f'reg query "{reg_path}" /v {value_name}')
+                        if reg_result.status_code == 0:
+                            reg_output = reg_result.std_out.decode().strip()
+                            # Parse registry value
+                            # Format: "ValueName    REG_DWORD    0x0" or "ValueName    REG_SZ    value"
+                            reg_key_backup = {
+                                "path": reg_path,
+                                "value_name": value_name,
+                                "output": reg_output
+                            }
+                            
+                            # Extract value type and data
+                            if "REG_DWORD" in reg_output:
+                                # Extract hex value (0x0, 0x1, etc.)
+                                hex_match = re.search(r'0x([0-9a-fA-F]+)', reg_output)
+                                if hex_match:
+                                    reg_key_backup["value_type"] = "REG_DWORD"
+                                    reg_key_backup["value_data"] = hex_match.group(0)
+                            elif "REG_SZ" in reg_output:
+                                # Extract string value
+                                parts = reg_output.split("REG_SZ")
+                                if len(parts) > 1:
+                                    reg_key_backup["value_type"] = "REG_SZ"
+                                    reg_key_backup["value_data"] = parts[1].strip()
+                            
+                            backup_key = f"registry_{reg_path.replace('\\', '_').replace(':', '')}_{value_name}"
+                            backup_data["data"][backup_key] = reg_key_backup
+                            print(f"   ✓ Registry key backed up: {reg_path}\\{value_name}")
+                        else:
+                            # Key might not exist, backup that info
+                            backup_key = f"registry_{reg_path.replace('\\', '_').replace(':', '')}_{value_name}"
+                            backup_data["data"][backup_key] = {
+                                "path": reg_path,
+                                "value_name": value_name,
+                                "exists": False,
+                                "note": "Registry key does not exist"
+                            }
+                            print(f"   ⚠️ Registry key does not exist: {reg_path}\\{value_name}")
+                    except Exception as e:
+                        print(f"   ⚠️ Error backing up registry key {reg_key.get('full_path', 'unknown')}: {e}")
             
             # 1. Backup Password Policy nếu rule sẽ sửa
             if "password" in policies_to_backup or not rule_id:
@@ -165,16 +219,58 @@ class RollbackManager:
         
         return settings
     
-    def _get_policies_to_backup_for_rule(self, rule_id: Optional[str]) -> List[str]:
-        """Xác định các policies cần backup dựa vào rule_id."""
+    def _extract_registry_keys_from_rule(self, rule_id: Optional[str]) -> List[Dict[str, str]]:
+        """Extract registry keys từ rule YAML để backup."""
+        registry_keys = []
+        if not rule_id:
+            return registry_keys
+        
+        try:
+            # Load rule YAML
+            rule = None
+            windows_rules = load_rules("windows-10")  # Load Windows 10 rules
+            for r in windows_rules:
+                if isinstance(r, dict) and r.get("id") == rule_id:
+                    rule = r
+                    break
+            
+            if rule:
+                # Extract registry keys từ check command
+                check_cmd = rule.get("check", {}).get("winrm", "")
+                if check_cmd and "reg query" in check_cmd:
+                    # Parse reg query command để extract registry path và value name
+                    # Format: reg query "HKLM\...\..." /v ValueName
+                    import re
+                    reg_pattern = r'reg query\s+"([^"]+)"\s+/v\s+(\S+)'
+                    matches = re.findall(reg_pattern, check_cmd)
+                    for reg_path, value_name in matches:
+                        registry_keys.append({
+                            "path": reg_path,
+                            "value_name": value_name,
+                            "full_path": f"{reg_path}\\{value_name}"
+                        })
+        except Exception as e:
+            print(f"   ⚠️ Failed to extract registry keys from rule: {e}")
+        
+        return registry_keys
+    
+    def _get_policies_to_backup_for_rule(self, rule_id: Optional[str]) -> Dict[str, Any]:
+        """Xác định các policies và registry keys cần backup dựa vào rule_id."""
         if not rule_id:
             # Fallback: backup tất cả nếu không có rule_id
-            return ["password", "remote_assistance", "admin_account", "audit_policy"]
+            return {
+                "policies": ["password", "remote_assistance", "admin_account", "audit_policy"],
+                "registry_keys": []
+            }
         
         policies = []
+        registry_keys = []
+        
+        # Extract registry keys từ rule YAML
+        registry_keys = self._extract_registry_keys_from_rule(rule_id)
         
         # Rule về password policy
-        if any(x in rule_id.lower() for x in ['password', 'account', 'lockout']):
+        if any(x in rule_id.lower() for x in ['password', 'account', 'lockout', '1.1.', '1.2.']):
             policies.append("password")
         
         # Rule về remote access
@@ -186,14 +282,35 @@ class RollbackManager:
             policies.append("admin_account")
         
         # Rule về audit/logging
-        if any(x in rule_id.lower() for x in ['audit', 'logging', 'logon']):
+        if any(x in rule_id.lower() for x in ['audit', 'logging', 'logon', '17.']):
             policies.append("audit_policy")
         
+        # Rule về network security (2.3.x) - thường sửa registry
+        if '2.3.' in rule_id:
+            # Nếu chưa có registry keys từ YAML, thử detect từ rule ID
+            if not registry_keys:
+                # Common registry paths for 2.3.x rules
+                if '2.3.10.1' in rule_id or 'anonymous' in rule_id.lower():
+                    registry_keys.append({
+                        "path": "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa",
+                        "value_name": "TurnOffAnonymousBlock",
+                        "full_path": "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa\\TurnOffAnonymousBlock"
+                    })
+                elif '2.3.11.7' in rule_id or 'lan manager' in rule_id.lower():
+                    registry_keys.append({
+                        "path": "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa",
+                        "value_name": "LmCompatibilityLevel",
+                        "full_path": "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa\\LmCompatibilityLevel"
+                    })
+        
         # Nếu không tìm thấy, backup password policy (phổ biến nhất)
-        if not policies:
+        if not policies and not registry_keys:
             policies.append("password")
         
-        return policies
+        return {
+            "policies": policies,
+            "registry_keys": registry_keys
+        }
     
     def _save_backup(self, backup_data: Dict) -> str:
         """Lưu backup vào MongoDB."""
@@ -284,14 +401,82 @@ class RollbackManager:
                     "exit_code": result.status_code
                 }
             
+            # 5. Khôi phục Registry Keys nếu có
+            for key, reg_data in backup["data"].items():
+                if key.startswith("registry_") and isinstance(reg_data, dict):
+                    try:
+                        reg_path = reg_data.get("path")
+                        value_name = reg_data.get("value_name")
+                        value_type = reg_data.get("value_type", "REG_DWORD")
+                        value_data = reg_data.get("value_data")
+                        exists = reg_data.get("exists", True)
+                        
+                        if not exists:
+                            # Registry key didn't exist, delete it if it exists now
+                            print(f"🔄 Registry key {reg_path}\\{value_name} did not exist originally, skipping restore")
+                            rollback_details[f"registry_{key}"] = {
+                                "status": "SKIPPED",
+                                "message": "Registry key did not exist originally"
+                            }
+                            continue
+                        
+                        if not reg_path or not value_name or not value_data:
+                            continue
+                        
+                        print(f"🔄 Restoring registry key: {reg_path}\\{value_name} = {value_data}")
+                        
+                        # Restore registry value
+                        if value_type == "REG_DWORD":
+                            # Convert hex to decimal for reg add command
+                            if value_data.startswith("0x"):
+                                decimal_value = int(value_data, 16)
+                            else:
+                                decimal_value = int(value_data)
+                            cmd = f'reg add "{reg_path}" /v {value_name} /t {value_type} /d {decimal_value} /f'
+                        else:
+                            # REG_SZ or other types
+                            cmd = f'reg add "{reg_path}" /v {value_name} /t {value_type} /d "{value_data}" /f'
+                        
+                        result = session.run_cmd(cmd)
+                        
+                        # Verify restoration
+                        verify_result = session.run_cmd(f'reg query "{reg_path}" /v {value_name}')
+                        verified = False
+                        if verify_result.status_code == 0:
+                            verify_output = verify_result.std_out.decode().strip()
+                            if value_data in verify_output or str(decimal_value) in verify_output:
+                                verified = True
+                        
+                        rollback_details[f"registry_{key}"] = {
+                            "status": "RESTORED" if verified else "PARTIAL",
+                            "command": cmd,
+                            "result": result.std_out.decode(),
+                            "exit_code": result.status_code,
+                            "verified": verified,
+                            "message": f"Registry key restored: {reg_path}\\{value_name} = {value_data}"
+                        }
+                        
+                        if verified:
+                            print(f"   ✓ Registry key restored: {reg_path}\\{value_name} = {value_data}")
+                        else:
+                            print(f"   ⚠️ Registry key restore verification failed: {reg_path}\\{value_name}")
+                    except Exception as e:
+                        print(f"   ⚠️ Error restoring registry key {key}: {e}")
+                        rollback_details[f"registry_{key}"] = {
+                            "status": "ERROR",
+                            "error": str(e),
+                            "message": f"Error restoring registry key: {e}"
+                        }
+            
             # Lưu rollback log
             rollback_log = {
                 "host": host,
                 "backup_id": backup["backup_id"],
                 "timestamp": datetime.utcnow(),
                 "type": "rollback_executed",
+                "os_type": "windows",
                 "rollback_details": rollback_details,
-                "status": "SUCCESS"
+                "status": "SUCCESS" if all(d.get("status") in ["RESTORED", "SKIPPED"] for d in rollback_details.values() if isinstance(d, dict)) else "PARTIAL"
             }
             
             self.db.backups.insert_one(rollback_log)
@@ -329,6 +514,7 @@ class RollbackManager:
             backups = list(self.db.backups.find(
                 {
                     "host": host,
+                    "os_type": "windows",
                     "type": "pre_remediation_backup"  # Chỉ lấy rule backups
                 },
                 sort=[("timestamp", -1)]

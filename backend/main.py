@@ -214,6 +214,10 @@ async def root_api_info():
                 "linux": "/rollback/linux",
                 "windows": "/rollback/windows"
             },
+            "test_connection": {
+                "linux": "/test/connection/linux",
+                "windows": "/test/connection/windows"
+            },
             "reports": {
                 "audits": "/reports/audits",
                 "remediations": "/reports/remediations",
@@ -701,6 +705,67 @@ async def test_linux_connection(
             "message": f"✅ Successfully connected to {Host} and verified access"
         }
         
+    except Exception as e:
+        print(f"❌ Connection test failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Connection test failed: {str(e)}")
+
+@app.post("/test/connection/windows", dependencies=[RequireAuth])
+async def test_windows_connection(
+    host: str = Form(...),
+    username: str = Form("Administrator"),
+    password: str = Form(..., json_schema_extra={"format": "password"}),
+):
+    """
+    Test connection và quyền truy cập vào Windows host.
+    Dùng để verify trước khi chạy remediation.
+    """
+    try:
+        print(f"🔌 Testing WinRM connection to {host}...")
+        
+        # Test WinRM connection
+        from windows_audit import winrm_connect, get_windows_host_info
+        
+        session = winrm_connect(host, username, password)
+        connection_info = {}
+        
+        try:
+            # Test basic command
+            test_result = session.run_cmd('echo Connection Test OK')
+            connection_info["basic_command"] = {
+                "success": test_result.status_code == 0,
+                "output": test_result.std_out.decode('utf-8', errors='ignore').strip(),
+                "error": test_result.std_err.decode('utf-8', errors='ignore').strip(),
+                "exit_code": test_result.status_code
+            }
+            
+            # Test PowerShell command
+            ps_test = session.run_ps("Write-Host 'PowerShell OK'")
+            connection_info["powershell"] = {
+                "available": ps_test.status_code == 0,
+                "output": ps_test.std_out.decode('utf-8', errors='ignore').strip(),
+                "error": ps_test.std_err.decode('utf-8', errors='ignore').strip(),
+                "exit_code": ps_test.status_code
+            }
+            
+            # Get host info
+            host_info = get_windows_host_info(session)
+            connection_info["host_info"] = host_info
+            
+        except Exception as conn_error:
+            raise HTTPException(status_code=400, detail=f"WinRM connection test failed: {str(conn_error)}")
+        
+        return {
+            "status": "SUCCESS",
+            "host": host,
+            "connection_verified": True,
+            "connection_info": connection_info,
+            "message": f"✅ Successfully connected to {host} and verified WinRM access"
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ Connection test failed: {e}")
         import traceback

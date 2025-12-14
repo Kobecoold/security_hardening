@@ -15,7 +15,7 @@ export default function Rollback() {
     }
   }, [userRole, navigate])
   const [host, setHost] = useState('')
-  const [osType, setOsType] = useState('linux')
+  const [osType, setOsType] = useState('')
   const [loading, setLoading] = useState(false)
   const [loadingBackups, setLoadingBackups] = useState(false)
   const [error, setError] = useState('')
@@ -62,7 +62,7 @@ export default function Rollback() {
 
     try {
       setLoadingBackups(true)
-      const endpoint = osType === 'linux' || osType.startsWith('ubuntu') || osType.startsWith('debian')
+      const endpoint = osType.startsWith('ubuntu') || osType.startsWith('debian')
         ? `/backups/linux?host=${host}`
         : `/backups/windows?host=${host}`
       
@@ -118,7 +118,7 @@ export default function Rollback() {
     setLoading(true)
 
     try {
-      if (osType === 'linux' || osType.startsWith('ubuntu') || osType.startsWith('debian')) {
+      if (osType.startsWith('ubuntu') || osType.startsWith('debian')) {
         // Linux rollback
         const formDataToSend = new FormData()
         formDataToSend.append('Host', host)
@@ -165,7 +165,7 @@ export default function Rollback() {
     }
   }
 
-  const isLinux = osType === 'linux' || osType.startsWith('ubuntu') || osType.startsWith('debian')
+  const isLinux = osType.startsWith('ubuntu') || osType.startsWith('debian')
 
   return (
     <div className="rollback-page">
