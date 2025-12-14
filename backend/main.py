@@ -1,9 +1,10 @@
-from fastapi import FastAPI, HTTPException, Form, Depends, Security
+from fastapi import FastAPI, HTTPException, Form, Depends, Security, Body
 from fastapi.security import APIKeyHeader
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Optional
+from pydantic import BaseModel
 from database import db
 from windows_rollback import rollback_manager
 from linux_rollback import linux_rollback_manager
@@ -1358,14 +1359,17 @@ async def get_remediation_reports(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+class BulkDeleteRequest(BaseModel):
+    ids: List[str]
+
 @app.post("/remediations/bulk-delete", dependencies=[RequireAdmin])
-async def bulk_delete_remediations(ids: List[str]):
+async def bulk_delete_remediations(request: BulkDeleteRequest):
     """Xóa nhiều remediation logs theo danh sách IDs."""
     try:
-        if not ids or len(ids) == 0:
+        if not request.ids or len(request.ids) == 0:
             raise HTTPException(status_code=400, detail="No IDs provided")
         
-        deleted_count = db.bulk_delete_remediations(ids)
+        deleted_count = db.bulk_delete_remediations(request.ids)
         return {
             "status": "success",
             "message": f"Deleted {deleted_count} remediation(s)",
