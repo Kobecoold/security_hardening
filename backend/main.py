@@ -458,13 +458,19 @@ async def audit_linux_json(
                 
                 duration_ms = int((time.time() - started) * 1000)
                 
-                # Log kết quả
+                # Log kết quả với chi tiết hơn
                 if exec_result.get("status") == "TIMEOUT":
                     print(f"    ⚠️ TIMEOUT after 30s")
                 elif exec_result.get("exit_status") == 0:
                     print(f"    ✅ PASS ({duration_ms}ms)")
                 else:
                     print(f"    ❌ FAIL ({duration_ms}ms)")
+                    # Log chi tiết khi fail để debug
+                    if exec_result.get("stdout"):
+                        print(f"       stdout: {exec_result['stdout'][:200]}")
+                    if exec_result.get("stderr"):
+                        print(f"       stderr: {exec_result['stderr'][:200]}")
+                    print(f"       use_sudo: {effective_use_sudo}")
                 
                 tout_dict = truncate_output(exec_result["stdout"]) 
                 terr_dict = truncate_output(exec_result["stderr"]) 
