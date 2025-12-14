@@ -73,6 +73,7 @@ export default function RemediationForm() {
   useEffect(() => {
     // When host and os_type are provided, load failed rules from latest audit
     if (formData.host && formData.os_type && !auditId) {
+      console.log(`Loading failed rules for host: ${formData.host}, OS: ${formData.os_type}`)
       loadFailedRulesFromLatestAudit()
     } else if (formData.os_type && !formData.host && !auditId) {
       // If only os_type is provided, load all available rules (fallback)
@@ -140,24 +141,32 @@ export default function RemediationForm() {
       setLoadingRules(true)
       setError('')
       
+      console.log(`🔍 Loading failed rules for host: ${formData.host}, OS type: ${formData.os_type}`)
+      
       // Get latest audit for this host
       const auditsResponse = await api.get(`/reports/audits?host=${formData.host}&limit=1`)
       const audits = auditsResponse.data.audits || []
       
+      console.log(`📊 Found ${audits.length} audit(s) for host ${formData.host}`)
+      
       if (audits.length === 0) {
-        setError(`No audit found for host ${formData.host}. Please run an audit first.`)
+        const errorMsg = `No audit found for host ${formData.host}. Please run an audit first.`
+        setError(errorMsg)
         setFailedRules([])
+        console.warn(`⚠️ ${errorMsg}`)
         return
       }
       
       const latestAudit = audits[0]
+      console.log(`📋 Latest audit: ID=${latestAudit._id}, OS=${latestAudit.os_type}, Results count=${(latestAudit.results || []).length}`)
       
       // Auto-detect OS type from audit if available, otherwise use form value
       const auditOSType = latestAudit.os_type || formData.os_type
+      console.log(`🖥️ Using OS type: ${auditOSType} (from audit: ${latestAudit.os_type || 'N/A'}, from form: ${formData.os_type})`)
       
       // Update form OS type if audit has different OS type (auto-detect)
       if (latestAudit.os_type && latestAudit.os_type !== formData.os_type) {
-        console.log(`Auto-detected OS type from audit: ${latestAudit.os_type} (was: ${formData.os_type})`)
+        console.log(`🔄 Auto-detected OS type from audit: ${latestAudit.os_type} (was: ${formData.os_type})`)
         setFormData(prev => ({
           ...prev,
           os_type: latestAudit.os_type
@@ -165,7 +174,10 @@ export default function RemediationForm() {
       }
       
       // Filter failed rules AND filter by OS type
-      const failed = (latestAudit.results || []).filter(r => {
+      const allResults = latestAudit.results || []
+      console.log(`🔍 Filtering ${allResults.length} rules...`)
+      
+      const failed = allResults.filter(r => {
         const status = (r.status || '').toUpperCase()
         const isFailed = (
           status === 'FAIL' || 
@@ -176,8 +188,14 @@ export default function RemediationForm() {
         // Also filter by OS type
         const matchesOS = isRuleForOS(r.id, auditOSType)
         
+        if (isFailed) {
+          console.log(`  Rule ${r.id}: status=${status}, matchesOS=${matchesOS}, will include=${isFailed && matchesOS}`)
+        }
+        
         return isFailed && matchesOS
       })
+      
+      console.log(`✅ Found ${failed.length} failed rules matching OS type ${auditOSType}`)
       
       // Map to rule format
       const failedRulesFormatted = failed.map(r => ({
@@ -192,11 +210,16 @@ export default function RemediationForm() {
       setFailedRules(failedRulesFormatted)
       
       if (failedRulesFormatted.length === 0) {
-        setError(`No failed rules found in the latest audit for ${formData.host} matching OS type "${auditOSType}". All rules are passing or no rules match the detected OS type!`)
+        const errorMsg = `No failed rules found in the latest audit for ${formData.host} matching OS type "${auditOSType}". All rules are passing or no rules match the detected OS type!`
+        setError(errorMsg)
+        console.warn(`⚠️ ${errorMsg}`)
+      } else {
+        console.log(`✅ Successfully loaded ${failedRulesFormatted.length} failed rules`)
       }
     } catch (err) {
-      console.error('Error loading latest audit:', err)
-      setError(`Failed to load audit for host ${formData.host}. ${err.response?.data?.detail || err.message}`)
+      console.error('❌ Error loading latest audit:', err)
+      const errorMsg = `Failed to load audit for host ${formData.host}. ${err.response?.data?.detail || err.message}`
+      setError(errorMsg)
       setFailedRules([])
     } finally {
       setLoadingRules(false)
@@ -590,14 +613,23 @@ export default function RemediationForm() {
                       </div>
                     )}
 
+                    {error && (
+                      <div className="error-banner" style={{ marginBottom: '1rem' }}>
+                        <AlertCircle size={16} />
+                        <span>{error}</span>
+                      </div>
+                    )}
+
                     <div className="rules-list">
                       {failedRules.length === 0 ? (
                         <div className="no-rules">
                           <AlertCircle size={20} />
                           <span>
-                            {formData.host 
-                              ? `No failed rules found for ${formData.host}. All rules are passing! Please run an audit first if you haven't.`
-                              : 'Please enter host and select OS type first'}
+                            {error 
+                              ? error
+                              : formData.host 
+                                ? `No failed rules found for ${formData.host}. All rules are passing! Please run an audit first if you haven't.`
+                                : 'Please enter host and select OS type first'}
                           </span>
                         </div>
                       ) : (
