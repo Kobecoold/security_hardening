@@ -39,6 +39,31 @@ export default function RemediationForm() {
   const [failedRules, setFailedRules] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
 
+  // Helper function to check if a rule ID belongs to Linux or Windows
+  const isRuleForOS = (ruleId, osType) => {
+    if (!ruleId || !osType) return true // If no info, show all (fallback)
+    
+    const ruleIdLower = ruleId.toLowerCase()
+    const osTypeLower = osType.toLowerCase()
+    
+    // Windows rules have prefix "winrm-cis-windows"
+    const isWindowsRule = ruleIdLower.startsWith('winrm-cis-windows')
+    
+    // Linux rules have prefix "cis-ubuntu", "cis-debian", or just "cis-" (but not winrm)
+    const isLinuxRule = ruleIdLower.startsWith('cis-') && !isWindowsRule
+    
+    // Check OS type
+    const isWindowsOS = osTypeLower.startsWith('windows')
+    const isLinuxOS = osTypeLower === 'linux' || osTypeLower.startsWith('ubuntu') || osTypeLower.startsWith('debian')
+    
+    // Match rule to OS
+    if (isWindowsOS && isWindowsRule) return true
+    if (isLinuxOS && isLinuxRule) return true
+    
+    // If OS type doesn't match rule type, filter it out
+    return false
+  }
+
   useEffect(() => {
     if (auditId) {
       loadFailedRulesFromAudit(auditId)
@@ -61,14 +86,23 @@ export default function RemediationForm() {
       const response = await api.get(`/reports/audits/${auditId}`)
       const audit = response.data
       
+      // Get OS type from audit or form
+      const auditOSType = audit.os_type || formData.os_type
+      
       // Filter failed rules (FAIL, ERROR, or exit_status !== 0)
+      // AND filter by OS type
       const failed = (audit.results || []).filter(r => {
         const status = (r.status || '').toUpperCase()
-        return (
+        const isFailed = (
           status === 'FAIL' || 
           status === 'ERROR' || 
           (r.exit_status !== undefined && r.exit_status !== 0 && status !== 'PASS' && status !== 'SKIPPED')
         )
+        
+        // Also filter by OS type
+        const matchesOS = isRuleForOS(r.id, auditOSType)
+        
+        return isFailed && matchesOS
       })
       
       // Map to rule format with id, title, description, level
@@ -112,14 +146,22 @@ export default function RemediationForm() {
       
       const latestAudit = audits[0]
       
-      // Filter failed rules
+      // Get OS type from audit or form
+      const auditOSType = latestAudit.os_type || formData.os_type
+      
+      // Filter failed rules AND filter by OS type
       const failed = (latestAudit.results || []).filter(r => {
         const status = (r.status || '').toUpperCase()
-        return (
+        const isFailed = (
           status === 'FAIL' || 
           status === 'ERROR' || 
           (r.exit_status !== undefined && r.exit_status !== 0 && status !== 'PASS' && status !== 'SKIPPED')
         )
+        
+        // Also filter by OS type
+        const matchesOS = isRuleForOS(r.id, auditOSType)
+        
+        return isFailed && matchesOS
       })
       
       // Map to rule format
@@ -135,7 +177,7 @@ export default function RemediationForm() {
       setFailedRules(failedRulesFormatted)
       
       if (failedRulesFormatted.length === 0) {
-        setError(`No failed rules found in the latest audit for ${formData.host}. All rules are passing!`)
+        setError(`No failed rules found in the latest audit for ${formData.host} matching OS type "${formData.os_type}". All rules are passing or no rules match the selected OS type!`)
       }
     } catch (err) {
       console.error('Error loading latest audit:', err)

@@ -55,7 +55,8 @@ class LinuxRollbackManager:
                         
                         if result["exit_status"] == 0 and result["stdout"]:
                             content = result["stdout"][:100000]
-                            file_key = file_path.replace("/", "_").replace(".", "_")
+                            # Create consistent key: strip leading /, replace / and . with _
+                            file_key = file_path.lstrip("/").replace("/", "_").replace(".", "_")
                             backup_data["data"][f"file_{file_key}"] = content
                             print(f"   ✓ {file_path} backed up ({len(content)} bytes)")
                         else:
@@ -65,7 +66,8 @@ class LinuxRollbackManager:
                             )
                             if result_sudo["exit_status"] == 0 and result_sudo["stdout"]:
                                 content = result_sudo["stdout"][:100000]
-                                file_key = file_path.replace("/", "_").replace(".", "_")
+                                # Create consistent key: strip leading /, replace / and . with _
+                                file_key = file_path.lstrip("/").replace("/", "_").replace(".", "_")
                                 backup_data["data"][f"file_{file_key}"] = content
                                 print(f"   ✓ {file_path} backed up with sudo ({len(content)} bytes)")
                             else:
@@ -74,23 +76,24 @@ class LinuxRollbackManager:
                         print(f"   ⚠️ Failed to backup {file_path}: {e}")
                 
                 # Backup file permissions cho TẤT CẢ files (không chỉ một số rules)
-                for file_path in files_to_backup:
-                    try:
-                        print(f"🔍 Backing up permissions for {file_path}...")
-                        perm_script = f"""
-                        timeout 5 sh -c 'if [ -e {file_path} ]; then stat -c "%a %U:%G" {file_path} 2>/dev/null || stat -f "%OLp %Su:%Sg" {file_path} 2>/dev/null || echo "unknown"; fi'
-                        """
+                    for file_path in files_to_backup:
+                        try:
+                            print(f"🔍 Backing up permissions for {file_path}...")
+                            perm_script = f"""
+                            timeout 5 sh -c 'if [ -e {file_path} ]; then stat -c "%a %U:%G" {file_path} 2>/dev/null || stat -f "%OLp %Su:%Sg" {file_path} 2>/dev/null || echo "unknown"; fi'
+                            """
                         # Try with sudo first for protected files
                         result = run_bash_check_stdin(ssh, perm_script, use_sudo=True, sudo_password=sudo_password, timeout=10)
                         if result["exit_status"] != 0 or not result["stdout"] or result["stdout"].strip() == "unknown":
                             # Fallback to non-sudo
                             result = run_bash_check_stdin(ssh, perm_script, use_sudo=False, timeout=10)
                         if result["exit_status"] == 0 and result["stdout"] and result["stdout"].strip() != "unknown":
-                            file_key = file_path.replace("/", "_").replace(".", "_")
-                            backup_data["data"][f"perms_{file_key}"] = result["stdout"].strip()
+                                # Create consistent key: strip leading /, replace / and . with _
+                                file_key = file_path.lstrip("/").replace("/", "_").replace(".", "_")
+                                backup_data["data"][f"perms_{file_key}"] = result["stdout"].strip()
                             print(f"   ✓ Permissions backed up for {file_path}: {result['stdout'].strip()}")
-                    except Exception as e:
-                        print(f"   ⚠️ Failed to backup permissions for {file_path}: {e}")
+                        except Exception as e:
+                            print(f"   ⚠️ Failed to backup permissions for {file_path}: {e}")
                 
                 # Backup sysctl settings nếu rule sửa sysctl (network rules 3.x)
                 if rule_id and any(x in rule_id for x in ['3.1.', '3.2.', '3.3.']):
@@ -141,13 +144,13 @@ class LinuxRollbackManager:
                         service_name = "auditd"
                     
                     if service_name:
-                        try:
+                    try:
                             print(f"🔍 Backing up {service_name} service status...")
                             status_script = f"""
                             timeout 5 sh -c 'systemctl is-active {service_name} 2>/dev/null || systemctl is-active {service_name}d 2>/dev/null || echo "unknown"'
-                            """
-                            result = run_bash_check_stdin(ssh, status_script, use_sudo=False, timeout=10)
-                            if result["exit_status"] == 0:
+                        """
+                        result = run_bash_check_stdin(ssh, status_script, use_sudo=False, timeout=10)
+                        if result["exit_status"] == 0:
                                 backup_data["data"][f"{service_name}_service_status"] = result["stdout"].strip()
                                 print(f"   ✓ {service_name} service status backed up: {result['stdout'].strip()}")
                             
@@ -191,7 +194,7 @@ class LinuxRollbackManager:
                             if result["exit_status"] == 0:
                                 backup_data["data"][f"{package_name}_installed"] = result["stdout"].strip()
                                 print(f"   ✓ {package_name} package status backed up")
-                        except Exception as e:
+                    except Exception as e:
                             print(f"   ⚠️ Failed to backup {package_name} package status: {e}")
                 
                 # Thêm thông tin backup
@@ -441,7 +444,8 @@ rm /tmp/sshd_config_restore
                                 file_path = "/etc/issue"
                         else:
                             # Try to reconstruct from key
-                            file_path = file_key.replace("file_", "").replace("_", "/")
+                            # Remove "file_" prefix, then replace _ with / and add leading /
+                            file_path = "/" + file_key.replace("file_", "").replace("_", "/")
                             # Only process if it looks like a valid path
                             if not file_path.startswith("/"):
                                 continue
