@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Optional
 from database import db
-from rollback import rollback_manager
+from windows_rollback import rollback_manager
 from linux_rollback import linux_rollback_manager
 from system_backup import system_backup_manager
 
