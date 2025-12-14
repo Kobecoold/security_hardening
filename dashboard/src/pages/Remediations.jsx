@@ -74,7 +74,8 @@ export default function Remediations() {
       loadRemediations()
     } catch (err) {
       console.error('Error deleting remediations:', err)
-      alert(err.response?.data?.detail || 'Failed to delete remediations')
+      const errorMessage = err.response?.data?.detail || err.response?.data?.message || err.message || 'Failed to delete remediations'
+      alert(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage))
     } finally {
       setDeleting(false)
     }
@@ -105,7 +106,8 @@ export default function Remediations() {
       loadRemediations()
     } catch (err) {
       console.error('Error clearing data:', err)
-      alert(err.response?.data?.detail || 'Failed to clear data')
+      const errorMessage = err.response?.data?.detail || err.response?.data?.message || err.message || 'Failed to clear data'
+      alert(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage))
     } finally {
       setDeleting(false)
     }
