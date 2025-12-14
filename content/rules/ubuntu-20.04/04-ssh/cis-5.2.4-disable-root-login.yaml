@@ -7,7 +7,41 @@ description: Ensure PermitRootLogin is set to no in /etc/ssh/sshd_config
 needs_sudo: false
 check:
   bash: |
-    sshd -T 2>/dev/null | grep -i '^permitrootlogin' | grep -qi 'no'
+    # Method 1: Check running SSH daemon config (most accurate)
+    # sshd -T outputs the effective configuration
+    if command -v sshd >/dev/null 2>&1; then
+      if sshd -T 2>/dev/null | grep -iE '^permitrootlogin' | grep -qiE '(no|false)'; then
+        exit 0
+      fi
+    fi
+    
+    # Method 2: Check main config file
+    if [ -r /etc/ssh/sshd_config ]; then
+      # Check for uncommented PermitRootLogin no
+      if grep -iE '^[[:space:]]*PermitRootLogin[[:space:]]+no' /etc/ssh/sshd_config >/dev/null 2>&1; then
+        exit 0
+      fi
+      # Check for PermitRootLogin without-password or prohibit-password (also secure)
+      if grep -iE '^[[:space:]]*PermitRootLogin[[:space:]]+(without-password|prohibit-password)' /etc/ssh/sshd_config >/dev/null 2>&1; then
+        exit 0
+      fi
+    fi
+    
+    # Method 3: Check config.d directory (Ubuntu/Debian may use this)
+    if [ -d /etc/ssh/sshd_config.d ] && [ -r /etc/ssh/sshd_config.d ]; then
+      for f in /etc/ssh/sshd_config.d/*.conf; do
+        [ -f "$f" ] && [ -r "$f" ] || continue
+        if grep -iE '^[[:space:]]*PermitRootLogin[[:space:]]+no' "$f" >/dev/null 2>&1; then
+          exit 0
+        fi
+        if grep -iE '^[[:space:]]*PermitRootLogin[[:space:]]+(without-password|prohibit-password)' "$f" >/dev/null 2>&1; then
+          exit 0
+        fi
+      done
+    fi
+    
+    # If none of the checks passed, the rule is not compliant
+    exit 1
 references:
   - https://ubuntu.com/security/cis
 controls:
