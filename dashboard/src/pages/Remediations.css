@@ -547,3 +547,32 @@
   cursor: not-allowed;
 }
 
+.remediation-details-toggle {
+  margin-top: 12px;
+  margin-bottom: 12px;
+}
+
+.btn-toggle-details {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-toggle-details:hover {
+  background: #e5e7eb;
+  border-color: #d1d5db;
+}
+
+.btn-toggle-details svg {
+  flex-shrink: 0;
+}
+

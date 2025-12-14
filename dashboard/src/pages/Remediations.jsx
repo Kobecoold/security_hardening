@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
-import { Wrench, RefreshCw, AlertCircle, CheckCircle, XCircle, Plus, RotateCcw, Trash2, Settings } from 'lucide-react'
+import { Wrench, RefreshCw, AlertCircle, CheckCircle, XCircle, Plus, RotateCcw, Trash2, Settings, ChevronDown, ChevronUp } from 'lucide-react'
 import './Remediations.css'
 
 export default function Remediations() {
@@ -14,6 +14,7 @@ export default function Remediations() {
   const [selectedIds, setSelectedIds] = useState(new Set())
   const [showClearDataModal, setShowClearDataModal] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [expandedIds, setExpandedIds] = useState(new Set())
 
   useEffect(() => {
     console.log('Remediations page - userRole:', userRole, 'isAdmin:', userRole === 'admin', 'type:', typeof userRole)
@@ -57,6 +58,16 @@ export default function Remediations() {
       newSelected.add(id)
     }
     setSelectedIds(newSelected)
+  }
+
+  const handleToggleExpand = (id) => {
+    const newExpanded = new Set(expandedIds)
+    if (newExpanded.has(id)) {
+      newExpanded.delete(id)
+    } else {
+      newExpanded.add(id)
+    }
+    setExpandedIds(newExpanded)
   }
 
   const handleBulkDelete = async () => {
@@ -200,6 +211,13 @@ export default function Remediations() {
           <div className="remediations-container">
             {remediations.map((remediation) => {
               const remediationId = remediation.remediation_id || remediation._id || remediation.id
+              const isWindows = remediation.os_type && (
+                remediation.os_type.toLowerCase().includes('windows') || 
+                remediation.os_type.toLowerCase().includes('win')
+              )
+              const isExpanded = expandedIds.has(remediationId)
+              const hasDetails = remediation.output || remediation.error || remediation.verification_passed !== undefined
+              
               return (
               <div key={remediationId} className="remediation-card">
                 {userRole && String(userRole).trim().toLowerCase() === 'admin' && (
@@ -242,6 +260,7 @@ export default function Remediations() {
                 </div>
               </div>
 
+              {/* Summary section - always visible */}
               <div className="remediation-details">
                 {remediation.backup_id && (
                   <div className="detail-item">
@@ -253,7 +272,8 @@ export default function Remediations() {
                     <strong>Exit Code:</strong> {remediation.exit_code}
                   </div>
                 )}
-                {remediation.verification_passed !== undefined && (
+                {/* Linux: Show verification in summary, Windows: Show in details */}
+                {!isWindows && remediation.verification_passed !== undefined && (
                   <div className="detail-item">
                     <strong>Verification:</strong>{' '}
                     {remediation.verification_passed ? (
@@ -263,22 +283,34 @@ export default function Remediations() {
                     )}
                   </div>
                 )}
-              {remediation.rollback_status && remediation.rollback_status === 'AVAILABLE' && remediation.backup_id && (
-                <div className="detail-item">
-                  <strong>Rule Backup:</strong>{' '}
-                  <span className="rollback-available">Available</span>
-                  {userRole && String(userRole).trim().toLowerCase() === 'admin' && (
-                    <button
-                      onClick={() => {
-                        if (remediation.status === 'SUCCESS' && remediation.verification_passed === true) {
-                          if (window.confirm(
-                            `⚠️ Rollback Warning\n\n` +
-                            `This remediation was successful. Rolling back will restore the system to its state before this remediation was applied.\n\n` +
-                            `Before remediation: System was in its previous state\n` +
-                            `After remediation: Rule ${remediation.rule_id || 'N/A'} is now PASS\n` +
-                            `Rollback will restore: System back to the state before remediation\n\n` +
-                            `Do you want to continue?`
-                          )) {
+                {remediation.rollback_status && remediation.rollback_status === 'AVAILABLE' && remediation.backup_id && (
+                  <div className="detail-item">
+                    <strong>Rule Backup:</strong>{' '}
+                    <span className="rollback-available">Available</span>
+                    {userRole && String(userRole).trim().toLowerCase() === 'admin' && (
+                      <button
+                        onClick={() => {
+                          if (remediation.status === 'SUCCESS' && remediation.verification_passed === true) {
+                            if (window.confirm(
+                              `⚠️ Rollback Warning\n\n` +
+                              `This remediation was successful. Rolling back will restore the system to its state before this remediation was applied.\n\n` +
+                              `Before remediation: System was in its previous state\n` +
+                              `After remediation: Rule ${remediation.rule_id || 'N/A'} is now PASS\n` +
+                              `Rollback will restore: System back to the state before remediation\n\n` +
+                              `Do you want to continue?`
+                            )) {
+                              navigate('/rollback', {
+                                state: {
+                                  host: remediation.host,
+                                  osType: remediation.os_type || remediation.os || remediation.client_type === 'linux' ? 'linux' : 'windows',
+                                  selectedBackup: remediation.backup_id,
+                                  remediationId: remediation.remediation_id || remediation._id,
+                                  ruleId: remediation.rule_id,
+                                  backupType: 'rules'
+                                }
+                              })
+                            }
+                          } else {
                             navigate('/rollback', {
                               state: {
                                 host: remediation.host,
@@ -290,42 +322,72 @@ export default function Remediations() {
                               }
                             })
                           }
-                        } else {
-                          navigate('/rollback', {
-                            state: {
-                              host: remediation.host,
-                              osType: remediation.os_type || remediation.os || remediation.client_type === 'linux' ? 'linux' : 'windows',
-                              selectedBackup: remediation.backup_id,
-                              remediationId: remediation.remediation_id || remediation._id,
-                              ruleId: remediation.rule_id,
-                              backupType: 'rules'
-                            }
-                          })
-                        }
-                      }}
-                      className="btn-rollback-small"
-                      title="Rollback rule"
-                    >
-                      <RotateCcw size={14} />
-                      Rollback Rule
-                    </button>
-                  )}
-                </div>
-              )}
+                        }}
+                        className="btn-rollback-small"
+                        title="Rollback rule"
+                      >
+                        <RotateCcw size={14} />
+                        Rollback Rule
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
-              {remediation.output && (
-                <div className="remediation-output">
-                  <strong>Output:</strong>
-                  <pre>{remediation.output.substring(0, 500)}{remediation.output.length > 500 ? '...' : ''}</pre>
+              {/* Windows: Collapsible details button - only show if there are details */}
+              {isWindows && hasDetails && (
+                <div className="remediation-details-toggle">
+                  <button
+                    onClick={() => handleToggleExpand(remediationId)}
+                    className="btn-toggle-details"
+                  >
+                    {isExpanded ? (
+                      <>
+                        <ChevronUp size={16} />
+                        Hide Details
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown size={16} />
+                        View Details
+                      </>
+                    )}
+                  </button>
                 </div>
               )}
 
-              {remediation.error && (
-                <div className="remediation-output error">
-                  <strong>Error:</strong>
-                  <pre>{remediation.error.substring(0, 500)}{remediation.error.length > 500 ? '...' : ''}</pre>
-                </div>
+              {/* Details section - Windows: only when expanded, Linux: always show */}
+              {(!isWindows || isExpanded) && (
+                <>
+                  {/* Windows: Show verification in details section */}
+                  {isWindows && remediation.verification_passed !== undefined && (
+                    <div className="remediation-details">
+                      <div className="detail-item">
+                        <strong>Verification:</strong>{' '}
+                        {remediation.verification_passed ? (
+                          <span className="verification-passed">✓ Passed</span>
+                        ) : (
+                          <span className="verification-failed">✗ Failed</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Output and Error - only in details section */}
+                  {remediation.output && (
+                    <div className="remediation-output">
+                      <strong>Output:</strong>
+                      <pre>{remediation.output}</pre>
+                    </div>
+                  )}
+
+                  {remediation.error && (
+                    <div className="remediation-output error">
+                      <strong>Error:</strong>
+                      <pre>{remediation.error}</pre>
+                    </div>
+                  )}
+                </>
               )}
 
               {remediation.message && (
