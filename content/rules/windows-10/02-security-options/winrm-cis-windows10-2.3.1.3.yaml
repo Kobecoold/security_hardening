@@ -6,7 +6,7 @@ level: 1
 description: Chỉ cho phép đăng nhập bằng mật khẩu trống tại console, không qua mạng.
 needs_sudo: false
 check:
-  winrm: reg query "HKLM\SYSTEM\CurrentControlSet\Control\Lsa" /v LimitBlankPasswordUse | findstr "0x1"
+  winrm: reg query "HKLM\SYSTEM\CurrentControlSet\Control\Lsa" /v LimitBlankPasswordUse 2>nul || echo KEY_NOT_EXIST
   expected: "0x1"
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop

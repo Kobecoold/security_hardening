@@ -7,7 +7,7 @@ description: Xác định độ dài tối thiểu của mật khẩu.
 needs_sudo: false
 check:
   winrm: net accounts | findstr "Minimum password length"
-  expected: "Minimum password length"
+  expected: "14"
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
 controls:

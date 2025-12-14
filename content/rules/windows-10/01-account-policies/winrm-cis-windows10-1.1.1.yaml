@@ -4,10 +4,11 @@ title: Ensure 'Enforce password history' is set to '24 or more passwords'
 description: Enforce password history of 24 passwords 
 benchmark: CIS Windows 10
 level: 1
-description: Enforce password history of 24 passwords
+description: Xác định số mật khẩu duy nhất phải được liên kết với tài khoản người dùng trước khi mật khẩu cũ có thể được sử dụng lại.
+needs_admin: true
 check:
-  winrm: net accounts | findstr "Password history"
-  expected: "Password history"
+  winrm: net accounts | findstr "Length of password history maintained"
+  expected: "24"
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
 controls:

@@ -6,8 +6,8 @@ level: 1
 description: Yêu cầu mật khẩu phải chứa ký tự từ 3-4 nhóm chữ hoa, chữ thường, số, ký tự đặc biệt.
 needs_sudo: false
 check:
-  winrm: net accounts | findstr "Password complexity"
-  expected: "Password complexity"
+  winrm: secedit /export /cfg %temp%\sec.cfg >nul && type "%temp%\sec.cfg" | findstr "PasswordComplexity"
+  expected: "1"
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
 controls:

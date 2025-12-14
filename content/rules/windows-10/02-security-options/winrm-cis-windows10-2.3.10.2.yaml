@@ -6,7 +6,7 @@ level: 1
 description: Ngăn liệt kê tài khoản SAM bởi người dùng ẩn danh.
 needs_sudo: false
 check:
-  winrm: reg query "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa" /v RestrictAnonymousSAM
+  winrm: reg query "HKLM\SYSTEM\CurrentControlSet\Control\Lsa" /v RestrictAnonymousSAM 2>nul || echo KEY_NOT_EXIST
   expected: "0x1"
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop

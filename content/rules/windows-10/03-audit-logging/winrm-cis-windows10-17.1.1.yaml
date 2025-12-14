@@ -6,7 +6,7 @@ level: 1
 description: Ghi lại cả thành công và thất bại xác thực thông tin đăng nhập.
 needs_sudo: false
 check:
-  winrm: auditpol /get /subcategory:"Credential Validation" | findstr "Success and Failure"
+  winrm: auditpol /get /subcategory:"Credential Validation" 
   expected: "Success and Failure"
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop

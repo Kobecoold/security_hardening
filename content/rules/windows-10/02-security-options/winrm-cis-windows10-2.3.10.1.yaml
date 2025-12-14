@@ -6,7 +6,7 @@ level: 1
 description: Ngăn người dùng ẩn danh chuyển đổi SID thành tên và ngược lại.
 needs_sudo: false
 check:
-  winrm: reg query "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa" /v TurnOffAnonymousBlock
+  winrm: reg query "HKLM\SYSTEM\CurrentControlSet\Control\Lsa" /v TurnOffAnonymousBlock 2>nul || echo KEY_NOT_EXIST
   expected: "0x0"
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop

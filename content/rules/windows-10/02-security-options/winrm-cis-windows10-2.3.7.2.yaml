@@ -6,7 +6,7 @@ level: 1
 description: Không hiển thị tên người dùng đăng nhập lần cuối trên màn hình đăng nhập.
 needs_sudo: false
 check:
-  winrm: reg query "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v DontDisplayLastUserName
+  winrm: reg query "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v DontDisplayLastUserName 2>nul || echo KEY_NOT_EXIST
   expected: "0x1"
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop

@@ -6,7 +6,7 @@ level: 1
 description: Ngăn lưu hash LAN Manager khi thay đổi mật khẩu.
 needs_sudo: false
 check:
-  winrm: reg query "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa" /v NoLMHash
+  winrm: reg query "HKLM\SYSTEM\CurrentControlSet\Control\Lsa" /v NoLMHash 2>nul || echo KEY_NOT_EXIST
   expected: "0x1"
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop

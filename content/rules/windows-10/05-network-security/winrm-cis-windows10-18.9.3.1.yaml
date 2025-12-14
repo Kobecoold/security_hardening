@@ -6,7 +6,7 @@ level: 1
 description: Ghi lại dòng lệnh khi process được tạo.
 needs_sudo: false
 check:
-  winrm: reg query "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System\\Audit" /v ProcessCreationIncludeCmdLine_Enabled
+  winrm: reg query "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit" /v ProcessCreationIncludeCmdLine_Enabled 2>nul || echo KEY_NOT_EXIST
   expected: "0x1"
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop

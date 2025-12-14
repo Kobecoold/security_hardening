@@ -6,8 +6,8 @@ level: 1
 description: Ngăn hệ điều hành lưu mật khẩu dưới dạng mã hóa thuận nghịch (tương đương plaintext).
 needs_sudo: false
 check:
-  winrm: net accounts | findstr "Reversible encryption"
-  expected: "Reversible encryption"
+  winrm: secedit /export /cfg %temp%\sec.cfg >nul && type "%temp%\sec.cfg" | findstr "ClearTextPassword"
+  expected: "0"
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
 controls:

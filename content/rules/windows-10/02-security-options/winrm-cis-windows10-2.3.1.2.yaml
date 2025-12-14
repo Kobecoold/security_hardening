@@ -7,7 +7,7 @@ description: Vô hiệu hóa tài khoản Guest.
 needs_sudo: false
 check:
   winrm: net user guest | findstr "Account active"
-  expected: "Account active.*No"
+  expected: "No"
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
 controls:

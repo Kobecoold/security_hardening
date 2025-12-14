@@ -6,7 +6,7 @@ level: 1
 description: Chỉ cho phép xác thực NTLMv2, từ chối LM và NTLM.
 needs_sudo: false
 check:
-  winrm: reg query "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa" /v LmCompatibilityLevel
+  winrm: reg query "HKLM\SYSTEM\CurrentControlSet\Control\Lsa" /v LmCompatibilityLevel 2>nul || echo KEY_NOT_EXIST
   expected: "0x5"
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop

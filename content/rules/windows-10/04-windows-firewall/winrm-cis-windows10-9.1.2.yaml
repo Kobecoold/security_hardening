@@ -6,9 +6,11 @@ level: 1
 description: Chặn kết nối inbound trừ khi có rule cho phép.
 needs_sudo: false
 check:
-  winrm: netsh advfirewall show domainprofile firewallpolicy | findstr "BlockInbound"
+  winrm: netsh advfirewall show domainprofile firewallpolicy | findstr "Firewall Policy"
   expected: "BlockInbound"
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
 controls:
   - CIS 9.1.2
+ 
+

@@ -6,7 +6,7 @@ level: 1
 description: Yêu cầu nhấn CTRL+ALT+DEL trước khi đăng nhập.
 needs_sudo: false
 check:
-  winrm: reg query "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v DisableCAD
+  winrm: reg query "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v DisableCAD 2>nul || echo KEY_NOT_EXIST
   expected: "0x0"
 references:
   - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
