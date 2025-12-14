@@ -641,57 +641,54 @@ async def test_linux_connection(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Connection test failed: {str(e)}")
 
-# SỬA ENDPOINT REMEDIATION ĐỂ TỰ ĐỘNG TẠO BACKUP
-@app.post("/remediate/windows", dependencies=[RequireAdmin])
+@app.post("/remediate/windows", dependencies=[RequireAuth])
 async def remediate_windows(
     host: str = Form(...),
-    username: str = Form("Window"),
+    username: str = Form(""),
     password: str = Form(..., json_schema_extra={"format": "password"}),
-    script_name: str = Form("fix-security-policies.ps1"),
+    Rule_id: str = Form(..., description="ID của rule cần fix, ví dụ: winrm-cis-windows10-1.1.1"),
     create_backup: bool = Form(True),
 ):
-    """Chạy remediation script - Tự động tạo backup - Lưu log vào MongoDB."""
+    """Chạy remediation script để fix Windows rule FAIL - Tự động tạo backup - Lưu log vào MongoDB."""
     try:
-        print(f"🔄 Starting remediation for {host} with username: {username}")
+        print(f"🔄 Starting Windows remediation for {host} with rule: {Rule_id}")
         
-        # Kết nối WinRM (dùng hàm cũ đã hoạt động)
+        # Kết nối WinRM
         session = winrm_connect(host, username, password)
         print("✅ WinRM connection established")
         
-        # Lấy thông tin host để có os_type (dùng cho cả backup và remediation)
+        # Lấy thông tin host
         host_info = get_windows_host_info(session)
         if host_info["status"] != "SUCCESS":
             raise HTTPException(status_code=400, detail=f"WinRM connection failed: {host_info.get('error', 'Unknown error')}")
-        os_type = host_info.get("os_type", "windows-unknown")
+        
+        os_type = host_info.get("os_type", "windows-10")
         
         backup_id = None
         
-        # Tạo backup nếu được yêu cầu - KHÔNG BLOCK NẾU LỖI
+        # Tạo backup nếu được yêu cầu
         if create_backup:
             try:
                 print("🔍 Creating backup...")
-                backup_id = rollback_manager.create_backup(host, session, rule_id=None)  # Windows remediation không có rule_id cụ thể
+                backup_id = rollback_manager.create_backup(host, session)
                 if backup_id:
                     print(f"✅ Backup created: {backup_id}")
                 else:
                     print(f"⚠️ Backup creation returned None (non-critical error)")
             except Exception as backup_error:
                 print(f"⚠️ Backup creation failed (non-critical): {backup_error}")
-                # KHÔNG RAISE ERROR - tiếp tục remediation
         
-        # Load script từ file
-        print(f"📄 Loading script: {script_name}")
-        try:
-            script_content = load_windows_remediation_script(script_name)
-            if not script_content:
-                raise HTTPException(status_code=404, detail=f"Remediation script not found: {script_name}. Check if file exists in scripts/remediation/window-10/")
-        except Exception as load_error:
-            error_msg = f"Failed to load script {script_name}: {str(load_error)}"
-            print(f"❌ {error_msg}")
-            raise HTTPException(status_code=500, detail=error_msg)
+        # Load remediation script
+        print(f"📄 Loading remediation script for rule: {Rule_id}")
+        script_content = load_windows_remediation_script(Rule_id)
+        if not script_content:
+            raise HTTPException(status_code=404, detail=f"Không tìm thấy remediation script cho rule: {Rule_id}")
+        print(f"✅ Script loaded ({len(script_content)} bytes)")
         
-        # Chạy script remediation
-        print("🚀 Running remediation script...")
+        # Chạy script remediation với timeout 5 phút
+        print(f"🚀 Running remediation script on {host}...")
+        print(f"   Timeout: 300 seconds")
+        
         try:
             result = session.run_ps(script_content)
         except Exception as exec_error:
@@ -699,33 +696,30 @@ async def remediate_windows(
             print(f"❌ {error_msg}")
             raise HTTPException(status_code=500, detail=error_msg)
         
-        # Normalize line endings và decode output
+        # Parse output
         output = result.std_out.decode('utf-8', errors='ignore').replace('\r\n', '\n').replace('\r', '\n').strip()
         error = result.std_err.decode('utf-8', errors='ignore').replace('\r\n', '\n').replace('\r', '\n').strip()
+        exit_code = result.status_code
         
-        print(f"📊 Script result - Exit code: {result.status_code}")
-        if output:
-            print(f"   Output length: {len(output)} characters")
-        if error:
-            print(f"   Error output: {error[:200]}...")
+        print(f"📊 Script result - Exit code: {exit_code}")
         
-        # Chuẩn bị dữ liệu remediation để lưu vào MongoDB
+        # Chuẩn bị dữ li remediation
         remediation_data = {
             "host": host,
             "username": username,
             "os_type": os_type,
+            "rule_id": Rule_id,
             "client_type": "windows",
-            "script_used": script_name,
             "backup_id": backup_id,
-            "status": "SUCCESS" if result.status_code == 0 else "PARTIAL",
-            "exit_code": result.status_code,
+            "status": "SUCCESS" if exit_code == 0 else "PARTIAL",
+            "exit_code": exit_code,
             "output": output,
             "error": error,
             "rollback_status": "AVAILABLE" if backup_id else "NO_BACKUP",
             "created_at": datetime.utcnow()
         }
         
-        # LƯU VÀO MONGODB
+        # Lưu vào MongoDB
         try:
             print("💾 Saving remediation log to MongoDB...")
             remediation_id = db.save_remediation_log(remediation_data)
@@ -734,28 +728,35 @@ async def remediate_windows(
             print(f"⚠️ MongoDB save failed (non-critical): {db_error}")
             remediation_id = None
         
+        # Determine final status
+        if exit_code == 0:
+            final_status = "SUCCESS"
+            message = f"✅ Remediation successful - Rule '{Rule_id}' is FIXED on {host}"
+        else:
+            final_status = "PARTIAL"
+            message = f"⚠️ Script failed (exit code {exit_code}) - Rule '{Rule_id}' may not be fixed on {host}"
+        
         return {
             "remediation_id": remediation_id,
+            "rule_id": Rule_id,
             "backup_id": backup_id,
-            "status": "SUCCESS" if result.status_code == 0 else "PARTIAL",
+            "status": final_status,
             "host": host,
             "os_type": os_type,
-            "script_used": script_name,
-            "exit_code": result.status_code,
-            "output": output[:1000] if output else "",
-            "error": error[:1000] if error else "",
-            "message": f"Remediation script '{script_name}' executed successfully" if result.status_code == 0 else f"Remediation script '{script_name}' completed with exit code {result.status_code}",
+            "exit_code": exit_code,
+            "output": output[:1000],
+            "error": error[:1000],
+            "message": message,
             "rollback_available": backup_id is not None
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        error_msg = f"Remediation failed: {str(e)}"
-        print(f"❌ {error_msg}")
+        print(f"❌ Remediation failed: {e}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=error_msg)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/rollback/windows", dependencies=[RequireAdmin])
 async def rollback_windows(
