@@ -594,15 +594,6 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                                     }
                                     print(f"   ⚠️ Failed to restore permissions for {file_path}: {result_perms.get('stderr', '')}")
                                     print(f"   ⚠️ stdout: {result_perms.get('stdout', '')}")
-                                else:
-                                    rollback_details[file_path] = {
-                                        "status": "PARTIAL",
-                                        "content_restored": True,
-                                        "permissions_restored": False,
-                                        "error": result_perms.get("stderr", ""),
-                                        "message": f"File content restored but permissions restore failed"
-                                    }
-                                    print(f"   ⚠️ File content restored but permissions restore failed for {file_path}")
                             else:
                                 # Content restored but no permissions data
                                 rollback_details[file_path] = {
