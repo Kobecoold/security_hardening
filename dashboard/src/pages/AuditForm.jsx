@@ -20,6 +20,8 @@ export default function AuditForm({ osType = 'linux' }) {
     use_sudo: false,
     sudo_password: ''
   })
+  
+  const [showSudoWarning, setShowSudoWarning] = useState(false)
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target
@@ -64,7 +66,17 @@ export default function AuditForm({ osType = 'linux' }) {
 
     } catch (err) {
       console.error('Audit error:', err)
-      setError(err.response?.data?.detail || err.message || 'Failed to run audit')
+      const errorMessage = err.response?.data?.detail || err.message || 'Failed to run audit'
+      setError(errorMessage)
+      
+      // Check if error is related to sudo password
+      const errorStr = String(errorMessage).toLowerCase()
+      if (errorStr.includes('sudo') && (errorStr.includes('password') || errorStr.includes('required'))) {
+        setShowSudoWarning(true)
+        if (!formData.use_sudo) {
+          setFormData(prev => ({ ...prev, use_sudo: true }))
+        }
+      }
     } finally {
       setLoading(false)
     }
@@ -130,29 +142,49 @@ export default function AuditForm({ osType = 'linux' }) {
           <div className="form-section">
             <h2>Privileges</h2>
             
+            {showSudoWarning && (
+              <div className="info-banner" style={{backgroundColor: '#fff3cd', border: '1px solid #ffc107', padding: '12px', borderRadius: '4px', marginBottom: '16px'}}>
+                <strong>⚠️ Important:</strong> Some audit rules require sudo privileges. 
+                If you see "sudo: a password is required" errors, enable "Use sudo" and provide your sudo password below.
+              </div>
+            )}
+            
             <div className="form-group checkbox-group">
               <label>
                 <input
                   type="checkbox"
                   name="use_sudo"
                   checked={formData.use_sudo}
-                  onChange={handleChange}
+                  onChange={(e) => {
+                    handleChange(e)
+                    if (e.target.checked) {
+                      setShowSudoWarning(false)
+                    }
+                  }}
                 />
                 Use sudo for commands that require root privileges
+                <small style={{display: 'block', marginTop: '4px', color: '#666'}}>
+                  Required for rules like bootloader permissions, filesystem checks, etc.
+                </small>
               </label>
             </div>
 
             {formData.use_sudo && (
               <div className="form-group">
-                <label htmlFor="sudo_password">Sudo Password</label>
+                <label htmlFor="sudo_password">Sudo Password *</label>
                 <input
                   id="sudo_password"
                   name="sudo_password"
                   type="password"
                   value={formData.sudo_password}
                   onChange={handleChange}
-                  placeholder="Sudo password if required"
+                  placeholder="Enter your sudo password"
+                  required={formData.use_sudo}
                 />
+                <small style={{display: 'block', marginTop: '4px', color: '#666'}}>
+                  This password will be used to run commands that require root privileges.
+                  If your user has NOPASSWD sudo, you can leave this empty.
+                </small>
               </div>
             )}
           </div>

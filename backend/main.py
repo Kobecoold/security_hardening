@@ -436,7 +436,15 @@ async def audit_linux_json(
                 print(f"    ⚠️ Skipped: no check.bash")
                 return {"id": rule_id, "title": rule_title, "status": "SKIPPED", "reason": "no check.bash"}
             
-            effective_use_sudo = bool(rule.get("needs_sudo", False) or Use_sudo)
+            # Auto-enable sudo if rule requires it
+            rule_needs_sudo = rule.get("needs_sudo", False)
+            effective_use_sudo = bool(rule_needs_sudo or Use_sudo)
+            
+            # Warn if sudo is needed but password not provided
+            if effective_use_sudo and not Sudo_password:
+                # Try to check if sudo works without password (NOPASSWD)
+                print(f"    ⚠️ Rule requires sudo but no password provided. Attempting sudo -n test...")
+            
             started = time.time()
             
             try:
@@ -450,6 +458,14 @@ async def audit_linux_json(
                         sudo_password=Sudo_password,
                         timeout=30,  # 30 seconds timeout cho audit checks
                     )
+                    
+                    # Check if failure is due to sudo password requirement
+                    if exec_result.get("exit_status") != 0 and effective_use_sudo:
+                        stderr_text = exec_result.get("stderr", "")
+                        if "sudo: a password is required" in stderr_text or "sudo: no password was provided" in stderr_text:
+                            print(f"    ⚠️ Sudo password required for this rule. Please provide sudo_password in audit request.")
+                            # Update stderr to be more helpful
+                            exec_result["stderr"] = f"Sudo password required. Please provide 'Sudo_password' parameter when running audit. Original error: {stderr_text}"
                 finally:
                     try:
                         ssh_local.close()
@@ -469,17 +485,28 @@ async def audit_linux_json(
                     if exec_result.get("stdout"):
                         print(f"       stdout: {exec_result['stdout'][:200]}")
                     if exec_result.get("stderr"):
-                        print(f"       stderr: {exec_result['stderr'][:200]}")
-                    print(f"       use_sudo: {effective_use_sudo}")
+                        stderr_text = exec_result.get("stderr", "")
+                        print(f"       stderr: {stderr_text[:200]}")
+                        # Check if failure is due to sudo password requirement
+                        if effective_use_sudo and ("sudo: a password is required" in stderr_text or 
+                                                   "sudo: no password was provided" in stderr_text or
+                                                   "sudo: a password is required" in stderr_text.lower()):
+                            print(f"       ⚠️ SUDO PASSWORD REQUIRED for this rule!")
+                            # Update stderr to be more helpful
+                            exec_result["stderr"] = f"⚠️ Sudo password required. This rule needs sudo privileges. Please provide 'Sudo_password' parameter when running audit. Original error: {stderr_text}"
+                    print(f"       use_sudo: {effective_use_sudo}, rule_needs_sudo: {rule_needs_sudo}")
                 
                 tout_dict = truncate_output(exec_result["stdout"]) 
-                terr_dict = truncate_output(exec_result["stderr"]) 
-                return {
+                terr_dict = truncate_output(exec_result["stderr"])
+                
+                # Add helpful message if sudo password is needed
+                result_data = {
                     "id": rule_id,
                     "title": rule_title,
                     "os": rule.get("os"),
                     "benchmark": rule.get("benchmark"),
                     "needs_sudo": effective_use_sudo,
+                    "rule_requires_sudo": rule_needs_sudo,
                     "exit_status": exec_result["exit_status"],
                     "status": exec_result["status"],
                     "stdout": tout_dict.get("text", ""),
@@ -491,6 +518,15 @@ async def audit_linux_json(
                     "duration_ms": duration_ms,
                     "started_at": int(started * 1000),
                 }
+                
+                # Add warning if sudo password is needed
+                if exec_result.get("exit_status") != 0 and effective_use_sudo:
+                    stderr_text = terr_dict.get("text", "")
+                    if "sudo: a password is required" in stderr_text or "sudo: no password was provided" in stderr_text:
+                        result_data["sudo_password_required"] = True
+                        result_data["help_message"] = "This rule requires sudo privileges. Please enable 'Use sudo' and provide 'Sudo password' when running audit."
+                
+                return result_data
             except Exception as rule_error:
                 print(f"    ❌ ERROR: {str(rule_error)[:100]}")
                 return {
