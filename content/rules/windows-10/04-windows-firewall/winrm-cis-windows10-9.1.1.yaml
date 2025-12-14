@@ -1,0 +1,14 @@
+id: winrm-cis-windows10-9.1.1
+os: windows-10
+title: Ensure 'Windows Firewall Domain Firewall state' is set to 'On (recommended)'
+benchmark: CIS Microsoft Windows 10 Enterprise Benchmark v4.0.0
+level: 1
+description: Bật tường lửa cho profile Domain.
+needs_sudo: false
+check:
+  winrm: netsh advfirewall show domainprofile state | findstr "ON"
+  expected: "ON"
+references:
+  - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
+controls:
+  - CIS 9.1.1

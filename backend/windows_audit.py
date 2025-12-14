@@ -2,6 +2,7 @@
 import winrm
 from typing import Dict, Optional
 import time
+import re  # THÊM IMPORT
 
 def winrm_connect(host: str, username: str, password: str) -> winrm.Session:
     """Kết nối WinRM với username/password qua HTTPS hoặc HTTP."""
@@ -13,13 +14,13 @@ def winrm_connect(host: str, username: str, password: str) -> winrm.Session:
             transport='ssl',
             server_cert_validation='ignore'
         )
-        # Test connection bằng cách chạy một command đơn giản
+        # Test connection
         test_result = session.run_cmd('echo test')
         if test_result.status_code is not None:
             return session
     except Exception as ssl_error:
         print(f"⚠️ WinRM HTTPS (port 5986) failed, trying HTTP: {ssl_error}")
-        # Fallback sang HTTP nếu HTTPS không hoạt động (port 5985)
+        # Fallback sang HTTP nếu HTTPS không hoạt động
         try:
             session = winrm.Session(
                 host,
@@ -32,43 +33,54 @@ def winrm_connect(host: str, username: str, password: str) -> winrm.Session:
             if test_result.status_code is not None:
                 return session
         except Exception as http_error:
-            # Tạo error message rõ ràng hơn
             error_msg = (
                 f"WinRM connection failed to {host}.\n"
                 f"HTTPS (port 5986) error: Connection refused\n"
                 f"HTTP (port 5985) error: Connection refused\n\n"
                 f"Possible causes:\n"
-                f"1. WinRM service is not running on Windows server\n"
+                f"1. WinRM service is not running\n"
                 f"2. WinRM is not enabled/configured\n"
-                f"3. Firewall is blocking ports 5985 (HTTP) or 5986 (HTTPS)\n"
+                f"3. Firewall is blocking ports 5985/5986\n"
                 f"4. Network connectivity issue\n\n"
-                f"To fix on Windows server (run PowerShell as Administrator):\n"
+                f"To fix (run PowerShell as Administrator):\n"
                 f"  Enable-PSRemoting -Force\n"
                 f"  winrm quickconfig\n"
                 f"  Enable-NetFirewallRule -DisplayGroup 'Windows Remote Management'"
             )
             raise Exception(error_msg)
     
-    raise Exception("WinRM connection test failed - unable to execute test command")
+    raise Exception("WinRM connection test failed")
 
 def detect_os_windows(session: winrm.Session) -> Optional[str]:
-    """Auto-detect Windows OS version using systeminfo."""
+    """Auto-detect Windows OS version một cách chính xác."""
     try:
-        # Chạy systeminfo để lấy thông tin OS
+        # Lấy thông tin OS từ systeminfo
         result = session.run_cmd('systeminfo | findstr /B /C:"OS Name"')
         
         if result.status_code != 0:
             return None
             
         output = result.std_out.decode('utf-8', errors='ignore')
-        # Normalize line endings
         output = output.replace('\r\n', '\n').replace('\r', '\n').strip()
         
+        # Lấy version number từ wmic
+        result_ver = session.run_cmd('wmic os get version')
+        version_output = ""
+        if result_ver.status_code == 0:
+            version_output = result_ver.std_out.decode('utf-8', errors='ignore')
+        
         # Parse OS name và version
-        if "Windows 10" in output:
+        # Windows 10/11 detection dựa trên build number
+        if "Windows 10" in output or "Windows 11" in output:
+            # Tìm build number từ version output
+            match = re.search(r'10\.0\.(\d+)', version_output)
+            if match:
+                build_number = int(match.group(1))
+                # Windows 11 build number bắt đầu từ 22000
+                if build_number >= 22000:
+                    return "windows-11"
+            # Mặc định là windows-10 nếu không tìm thấy hoặc build < 22000
             return "windows-10"
-        elif "Windows 11" in output:
-            return "windows-11"
         elif "Windows Server" in output:
             if "2016" in output:
                 return "windows-server-2016"
@@ -86,19 +98,24 @@ def detect_os_windows(session: winrm.Session) -> Optional[str]:
         return None
 
 def get_windows_host_info(session: winrm.Session) -> Dict:
-    """Lấy thông tin host Windows thay thế cho test_winrm_connection."""
+    """Lấy thông tin host Windows."""
     try:
         # Lấy hostname
         result = session.run_cmd('hostname')
         hostname = result.std_out.decode().strip() if result.status_code == 0 else "Unknown"
         
-        # Detect OS
+        # Detect OS với hàm đã cập nhật
         os_type = detect_os_windows(session)
+        
+        # Lấy thêm thông tin (optional)
+        result_ip = session.run_cmd('ipconfig | findstr IPv4')
+        ip_address = result_ip.std_out.decode().split(':')[-1].strip() if result_ip.status_code == 0 else "Unknown"
         
         return {
             "status": "SUCCESS",
             "hostname": hostname,
             "os_type": os_type,
+            "ip_address": ip_address,
             "exit_code": result.status_code,
             "message": "WinRM connection successful"
         }
@@ -111,7 +128,6 @@ def get_windows_host_info(session: winrm.Session) -> Dict:
 
 def run_winrm_audit(session: winrm.Session, rule: Dict) -> Dict:
     """Audit Windows rule using WinRM."""
-    # Kiểm tra cấu trúc rule
     if "check" not in rule:
         return {
             "id": rule.get("id", "unknown"),
@@ -156,15 +172,11 @@ def run_winrm_audit(session: winrm.Session, rule: Dict) -> Dict:
             output = result.std_err.decode('utf-8', errors='ignore')
             error_output = ""
         
-        # Normalize line endings: \r\n -> \n, và clean up
+        # Normalize line endings
         output = output.replace('\r\n', '\n').replace('\r', '\n')
         error_output = error_output.replace('\r\n', '\n').replace('\r', '\n')
         
-        # Strip leading/trailing whitespace nhưng giữ lại line breaks bên trong
-        output = output.strip()
-        error_output = error_output.strip()
-        
-        # Kiểm tra kết quả (so sánh với output đã normalize)
+        # Kiểm tra kết quả
         status = "PASS" if expected in output else "FAIL"
         
         return {

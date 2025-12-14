@@ -1,0 +1,14 @@
+id: winrm-cis-windows10-1.1.5
+os: windows-10
+title: Ensure 'Password must meet complexity requirements' is set to 'Enabled'
+benchmark: CIS Microsoft Windows 10 Enterprise Benchmark v4.0.0
+level: 1
+description: Yêu cầu mật khẩu phải chứa ký tự từ 3-4 nhóm chữ hoa, chữ thường, số, ký tự đặc biệt.
+needs_sudo: false
+check:
+  winrm: secedit /export /cfg %temp%\sec.cfg >nul && type "%temp%\sec.cfg" | findstr "PasswordComplexity"
+  expected: "1"
+references:
+  - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
+controls:
+  - CIS 1.1.5

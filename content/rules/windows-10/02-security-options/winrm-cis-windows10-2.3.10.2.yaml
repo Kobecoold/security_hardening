@@ -1,0 +1,14 @@
+id: winrm-cis-windows10-2.3.10.2
+os: windows-10
+title: Ensure 'Network access Do not allow anonymous enumeration of SAM accounts' is set to 'Enabled'
+benchmark: CIS Microsoft Windows 10 Enterprise Benchmark v4.0.0
+level: 1
+description: Ngăn liệt kê tài khoản SAM bởi người dùng ẩn danh.
+needs_sudo: false
+check:
+  winrm: reg query "HKLM\SYSTEM\CurrentControlSet\Control\Lsa" /v RestrictAnonymousSAM 2>nul || echo KEY_NOT_EXIST
+  expected: "0x1"
+references:
+  - https://www.cisecurity.org/benchmark/microsoft_windows_desktop
+controls:
+  - CIS 2.3.10.2
