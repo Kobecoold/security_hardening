@@ -248,7 +248,7 @@ RequireAdmin = Depends(require_admin)
 @app.post("/audit/windows", dependencies=[RequireAdmin])
 async def audit_windows_winrm(
     host: str = Form(...),
-    username: str = Form("Window"),
+    username: str = Form(""),
     password: str = Form(..., json_schema_extra={"format": "password"}),
 ):
     """Audit Windows using WinRM - Lưu kết quả vào MongoDB."""
