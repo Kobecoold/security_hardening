@@ -713,7 +713,8 @@ async def remediate_windows(
     host: str = Form(...),
     username: str = Form("Window"),
     password: str = Form(..., json_schema_extra={"format": "password"}),
-    script_name: str = Form("fix-security-policies.ps1"),
+    rule_id: Optional[str] = Form(None),  # Optional: specific rule ID to fix
+    script_name: Optional[str] = Form(None),  # Optional: specific script name
     create_backup: bool = Form(True),
 ):
     """Chạy remediation script - Tự động tạo backup - Lưu log vào MongoDB."""
@@ -736,7 +737,7 @@ async def remediate_windows(
         if create_backup:
             try:
                 print("🔍 Creating backup...")
-                backup_id = rollback_manager.create_backup(host, session, rule_id=None)  # Windows remediation không có rule_id cụ thể
+                backup_id = rollback_manager.create_backup(host, session, rule_id=rule_id)  # Pass rule_id if provided
                 if backup_id:
                     print(f"✅ Backup created: {backup_id}")
                 else:
@@ -746,13 +747,25 @@ async def remediate_windows(
                 # KHÔNG RAISE ERROR - tiếp tục remediation
         
         # Load script từ file
-        print(f"📄 Loading script: {script_name}")
+        # Nếu có rule_id, thử load script cho rule đó, nếu không thì dùng script_name hoặc default
+        script_to_load = script_name
+        if rule_id:
+            print(f"📋 Remediating specific rule: {rule_id}")
+            # Thử tìm script cho rule này (format: winrm-cis-windows10-X.X.X -> script name)
+            # Windows remediation thường dùng một script tổng quát, nhưng có thể có scripts riêng
+            # Tạm thời dùng script_name nếu có, nếu không thì dùng default
+            if not script_name:
+                script_to_load = "fix-security-policies.ps1"  # Default script
+        else:
+            script_to_load = script_name or "fix-security-policies.ps1"
+        
+        print(f"📄 Loading script: {script_to_load}")
         try:
-            script_content = load_windows_remediation_script(script_name)
+            script_content = load_windows_remediation_script(script_to_load)
             if not script_content:
-                raise HTTPException(status_code=404, detail=f"Remediation script not found: {script_name}. Check if file exists in scripts/remediation/window-10/")
+                raise HTTPException(status_code=404, detail=f"Remediation script not found: {script_to_load}. Check if file exists in scripts/remediation/window-10/")
         except Exception as load_error:
-            error_msg = f"Failed to load script {script_name}: {str(load_error)}"
+            error_msg = f"Failed to load script {script_to_load}: {str(load_error)}"
             print(f"❌ {error_msg}")
             raise HTTPException(status_code=500, detail=error_msg)
         
@@ -781,7 +794,8 @@ async def remediate_windows(
             "username": username,
             "os_type": os_type,
             "client_type": "windows",
-            "script_used": script_name,
+            "rule_id": rule_id,  # Store rule_id if provided
+            "script_used": script_to_load,
             "backup_id": backup_id,
             "status": "SUCCESS" if result.status_code == 0 else "PARTIAL",
             "exit_code": result.status_code,
@@ -806,7 +820,8 @@ async def remediate_windows(
             "status": "SUCCESS" if result.status_code == 0 else "PARTIAL",
             "host": host,
             "os_type": os_type,
-            "script_used": script_name,
+            "rule_id": rule_id,  # Return rule_id if provided
+            "script_used": script_to_load,
             "exit_code": result.status_code,
             "output": output[:1000] if output else "",
             "error": error[:1000] if error else "",

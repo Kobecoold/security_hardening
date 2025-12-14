@@ -350,19 +350,57 @@ export default function RemediationForm() {
           navigate('/remediations')
         }, 2000)
       } else {
-        // Windows remediation
-        const formDataToSend = new FormData()
-        formDataToSend.append('host', formData.host)
-        formDataToSend.append('username', formData.username || 'Administrator')
-        formDataToSend.append('password', formData.password)
-        formDataToSend.append('script_name', 'fix-security-policies.ps1')
-        formDataToSend.append('create_backup', formData.create_backup)
+        // Windows remediation - run for each selected rule (similar to Linux)
+        if (formData.rule_ids.length === 0) {
+          setError('Please select at least one rule to fix')
+          setLoading(false)
+          return
+        }
 
-        const response = await api.post('/remediate/windows', formDataToSend, {
-          headers: {
-            'Content-Type': 'multipart/form-data'
+        const validRuleIds = formData.rule_ids.filter(id => id && id.trim() !== '')
+        
+        if (validRuleIds.length === 0) {
+          setError('Please select at least one valid rule to fix')
+          setLoading(false)
+          return
+        }
+
+        const results = []
+        for (let i = 0; i < validRuleIds.length; i++) {
+          const ruleId = validRuleIds[i]
+          
+          if (!ruleId || ruleId.trim() === '') {
+            console.warn('Skipping invalid rule ID:', ruleId)
+            continue
           }
-        })
+          
+          console.log(`Processing Windows rule ${i + 1}/${validRuleIds.length}: ${ruleId}`)
+          
+          const formDataToSend = new FormData()
+          formDataToSend.append('host', formData.host)
+          formDataToSend.append('username', formData.username || 'Administrator')
+          formDataToSend.append('password', formData.password)
+          formDataToSend.append('rule_id', ruleId.trim())
+          // Only create backup for first rule
+          formDataToSend.append('create_backup', formData.create_backup && i === 0)
+
+          try {
+            const response = await api.post('/remediate/windows', formDataToSend, {
+              headers: {
+                'Content-Type': 'multipart/form-data'
+              }
+            })
+            results.push(response.data)
+          } catch (err) {
+            console.error(`Error remediating Windows rule ${ruleId}:`, err)
+            // Continue with next rule instead of stopping
+            results.push({
+              rule_id: ruleId,
+              status: 'FAILED',
+              error: err.response?.data?.detail || err.message
+            })
+          }
+        }
 
         setSuccess(true)
         setTimeout(() => {
@@ -595,9 +633,9 @@ export default function RemediationForm() {
 
           {!isLinux && (
             <>
-              {/* Show failed rules for Windows too */}
+              {/* Show failed rules for Windows - same as Linux with selection */}
               <div className="form-section">
-                <h2>Failed Rules from Latest Audit</h2>
+                <h2>Select Rules to Fix *</h2>
                 
                 {loadingRules ? (
                   <div className="loading-rules">
@@ -606,10 +644,42 @@ export default function RemediationForm() {
                   </div>
                 ) : (
                   <>
+                    <div className="rules-header">
+                      <div className="form-group">
+                        <label htmlFor="search-rules">Search Rules</label>
+                        <input
+                          id="search-rules"
+                          type="text"
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                          placeholder="Search by ID, title, or description..."
+                        />
+                      </div>
+                      <div className="rules-actions">
+                        <button type="button" onClick={handleSelectAll} className="btn-select-all">
+                          Select All
+                        </button>
+                        <button type="button" onClick={handleDeselectAll} className="btn-deselect-all">
+                          Deselect All
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="rules-selection-info">
+                      <span>
+                        {formData.rule_ids.length} rule(s) selected
+                        {failedRules.length > 0 && (
+                          <span className="failed-rules-badge">
+                            ({failedRules.length} failed rule(s) from latest audit)
+                          </span>
+                        )}
+                      </span>
+                    </div>
+
                     {failedRules.length > 0 && (
                       <div className="info-banner">
                         <AlertCircle size={16} />
-                        <span>Showing {failedRules.length} failed rule(s) from the latest audit for {formData.host}. Windows remediation will fix all failed rules.</span>
+                        <span>Showing only FAILED rules from the latest audit for {formData.host}. Select rules that need remediation.</span>
                       </div>
                     )}
 
@@ -621,41 +691,53 @@ export default function RemediationForm() {
                     )}
 
                     <div className="rules-list">
-                      {failedRules.length === 0 ? (
+                      {getFilteredRules().length === 0 ? (
                         <div className="no-rules">
                           <AlertCircle size={20} />
                           <span>
                             {error 
                               ? error
-                              : formData.host 
+                              : formData.host && failedRules.length === 0 
                                 ? `No failed rules found for ${formData.host}. All rules are passing! Please run an audit first if you haven't.`
-                                : 'Please enter host and select OS type first'}
+                                : formData.os_type 
+                                  ? `No rules found. Try changing OS type or check if rules exist for ${formData.os_type}`
+                                  : 'Please select OS type and enter host first'}
                           </span>
                         </div>
                       ) : (
-                        failedRules
+                        getFilteredRules()
                           .filter(rule => rule.id && rule.id.trim() !== '')
-                          .map((rule) => (
-                            <div key={rule.id} className="rule-item">
-                              <div className="rule-info">
-                                <div className="rule-id">{rule.id}</div>
-                                <div className="rule-title">{rule.title || 'No title'}</div>
-                                {rule.description && (
-                                  <div className="rule-description">{rule.description}</div>
-                                )}
-                                <div className="rule-meta">
-                                  {rule.level && (
-                                    <span className="rule-level">Level: {rule.level}</span>
-                                  )}
-                                  {rule.status && (
-                                    <span className={`rule-status rule-status-${(rule.status || '').toLowerCase()}`}>
-                                      Status: {rule.status}
-                                    </span>
-                                  )}
-                                </div>
+                          .map((rule) => {
+                            const isSelected = formData.rule_ids.includes(rule.id)
+                            return (
+                              <div key={rule.id} className={`rule-item ${isSelected ? 'selected' : ''}`}>
+                                <label className="rule-checkbox">
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => handleRuleToggle(rule.id)}
+                                  />
+                                  <div className="rule-info">
+                                    <div className="rule-id">{rule.id}</div>
+                                    <div className="rule-title">{rule.title || 'No title'}</div>
+                                    {rule.description && (
+                                      <div className="rule-description">{rule.description}</div>
+                                    )}
+                                    <div className="rule-meta">
+                                      {rule.level && (
+                                        <span className="rule-level">Level: {rule.level}</span>
+                                      )}
+                                      {rule.status && (
+                                        <span className={`rule-status rule-status-${(rule.status || '').toLowerCase()}`}>
+                                          Status: {rule.status}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </label>
                               </div>
-                            </div>
-                          ))
+                            )
+                          })
                       )}
                     </div>
                   </>
