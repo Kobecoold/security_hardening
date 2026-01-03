@@ -245,6 +245,33 @@ class RollbackManager:
                 "description": "Firewall settings backup"
             }
         else:
+            # Thử extract registry keys từ rule YAML file
+            try:
+                rules = load_rules()
+                rule_data = None
+                for r in rules:
+                    if r.get("id") == rule_id:
+                        rule_data = r
+                        break
+                
+                if rule_data:
+                    check_cmd = rule_data.get("check", {}).get("winrm", "")
+                    # Parse registry query command: reg query "HKLM\...\Path" /v ValueName
+                    reg_match = re.search(r'reg query\s+"([^"]+)"\s+/v\s+(\S+)', check_cmd)
+                    if reg_match:
+                        reg_path = reg_match.group(1)
+                        value_name = reg_match.group(2)
+                        return {
+                            "type": "registry",
+                            "rule_id": rule_id,
+                            "registry_path": reg_path,
+                            "registry_value": value_name,
+                            "value_name": value_name,  # Alias for compatibility
+                            "description": f"Registry backup for {rule_id}"
+                        }
+            except Exception as e:
+                print(f"   ⚠️ Failed to extract registry from rule YAML: {e}")
+            
             # Default: backup registry keys phổ biến
             return {
                 "type": "registry_fallback",
@@ -351,9 +378,31 @@ class RollbackManager:
                     # Collect registry keys và policies
                     if backup_plan.get("type") == "registry":
                         reg_path = backup_plan.get("registry_path")
-                        value_name = backup_plan.get("value_name")
-                        if reg_path:
+                        value_name = backup_plan.get("registry_value") or backup_plan.get("value_name")
+                        if reg_path and value_name:
                             all_registry_keys.add((reg_path, value_name))
+                    
+                    # Nếu không có trong mapping, thử extract từ rule YAML
+                    if not all_registry_keys or backup_plan.get("type") not in ["registry", "net_accounts", "net_user", "secedit", "netsh", "auditpol"]:
+                        try:
+                            rules = load_rules()
+                            rule_data = None
+                            for r in rules:
+                                if r.get("id") == rule_id:
+                                    rule_data = r
+                                    break
+                            
+                            if rule_data:
+                                check_cmd = rule_data.get("check", {}).get("winrm", "")
+                                # Parse registry query command: reg query "HKLM\...\Path" /v ValueName
+                                reg_match = re.search(r'reg query\s+"([^"]+)"\s+/v\s+(\S+)', check_cmd)
+                                if reg_match:
+                                    reg_path = reg_match.group(1)
+                                    value_name = reg_match.group(2)
+                                    all_registry_keys.add((reg_path, value_name))
+                                    print(f"   📋 Rule {rule_id}: extracted registry {reg_path}\\{value_name} from YAML")
+                        except Exception as e:
+                            print(f"   ⚠️ Failed to extract registry from rule YAML for {rule_id}: {e}")
                     
                     policies = backup_plan.get("policies", [])
                     if policies:
@@ -812,7 +861,19 @@ class RollbackManager:
             
             # Rollback theo từng loại backup
             try:
-                if backup_type == "net_accounts":
+                if backup_type == "batch":
+                    # Batch backup - restore tất cả registry keys và policies từ backup data
+                    print("🔄 Restoring batch backup - processing all registry keys and policies...")
+                    # Restore registry keys (sẽ được xử lý ở phần dưới)
+                    # Restore policies nếu có
+                    if "net_accounts" in backup["data"] or "parsed_net_accounts" in backup["data"]:
+                        self._restore_net_accounts(session, backup["data"], rollback_details)
+                    if "guest_account_active" in backup["data"]:
+                        self._restore_net_user_guest(session, backup["data"], rollback_details)
+                    if "secedit_export" in backup["data"]:
+                        self._restore_secedit_policy(session, backup["data"], rollback_details)
+                    # Registry keys sẽ được restore ở phần dưới
+                elif backup_type == "net_accounts":
                     self._restore_net_accounts(session, backup["data"], rollback_details)
                 elif backup_type == "net_user":
                     self._restore_net_user_guest(session, backup["data"], rollback_details)
@@ -870,41 +931,114 @@ class RollbackManager:
                         # Format string (từ batch backup cũ) - parse từ reg query output
                         # Example: "    RequireSecuritySignature    REG_DWORD    0x1"
                         # Extract từ backup_key: registry_HKLM_SYSTEM_CurrentControlSet_Services_LanmanServer_Parameters_RequireSecuritySignature
-                        parts = key.replace("registry_", "").split("_")
+                        key_without_prefix = key.replace("registry_", "")
+                        parts = key_without_prefix.split("_")
                         if len(parts) < 2:
+                            print(f"   ⚠️ Invalid backup key format: {key}")
                             continue
                         
-                        # Last part is value_name, rest is path
-                        value_name = parts[-1]
-                        path_parts = parts[:-1]
-                        
-                        # Reconstruct registry path: HKLM\SYSTEM\CurrentControlSet\...
-                        if path_parts[0].startswith("HKLM") or path_parts[0].startswith("HKEY"):
-                            reg_path = "\\".join(path_parts)
-                        else:
-                            reg_path = "HKLM\\" + "\\".join(path_parts)
-                        
-                        # Parse reg_data string to extract value_type and value_data
-                        # Format: "    value_name    REG_DWORD    0x1" or "    value_name    REG_SZ    value"
+                        # Parse reg_data string để tìm value_name thực tế
+                        # Format: "    value_name    REG_DWORD    0x1"
                         reg_line = reg_data.strip()
-                        if value_name in reg_line:
-                            # Extract value type and data
-                            parts_line = reg_line.split()
-                            if len(parts_line) >= 3:
-                                # Find REG_* type
-                                for i, part in enumerate(parts_line):
-                                    if part.startswith("REG_"):
-                                        value_type = part
-                                        if i + 1 < len(parts_line):
-                                            value_data = parts_line[i + 1]
+                        reg_parts = reg_line.split()
+                        
+                        if len(reg_parts) >= 3:
+                            # value_name là phần đầu tiên (sau khi strip whitespace)
+                            potential_value_name = reg_parts[0].strip()
+                            
+                            # Tìm REG_* type và value_data
+                            reg_type_idx = None
+                            for i, part in enumerate(reg_parts):
+                                if part.startswith("REG_"):
+                                    reg_type_idx = i
+                                    value_type = part
+                                    if i + 1 < len(reg_parts):
+                                        value_data = reg_parts[i + 1]
+                                    else:
+                                        value_data = ""
+                                    break
+                            
+                            if reg_type_idx is None:
+                                # Fallback: assume REG_DWORD if not found
+                                value_type = "REG_DWORD"
+                                value_data = reg_parts[-1] if len(reg_parts) > 1 else ""
+                            
+                            # Xác định value_name và reg_path từ backup_key
+                            # Backup key format: registry_HKLM_SYSTEM_CurrentControlSet_Control_Lsa_TurnOffAnonymousBlock
+                            # Cần tìm value_name trong backup_key
+                            if potential_value_name and potential_value_name != "None":
+                                value_name = potential_value_name
+                                # Tìm vị trí value_name trong backup_key
+                                if value_name in key_without_prefix:
+                                    value_name_idx = key_without_prefix.rfind(value_name)
+                                    if value_name_idx > 0:
+                                        # Extract path part (trước value_name)
+                                        path_part = key_without_prefix[:value_name_idx].rstrip('_')
+                                        path_parts = path_part.split('_')
+                                        if path_parts and path_parts[0].startswith(("HKLM", "HKEY")):
+                                            reg_path = "\\".join(path_parts)
                                         else:
-                                            value_data = ""
-                                        break
+                                            reg_path = "HKLM\\" + "\\".join(path_parts)
+                                    else:
+                                        # Fallback: use last part as value_name
+                                        value_name = parts[-1]
+                                        path_parts = parts[:-1]
+                                        if path_parts and path_parts[0].startswith(("HKLM", "HKEY")):
+                                            reg_path = "\\".join(path_parts)
+                                        else:
+                                            reg_path = "HKLM\\" + "\\".join(path_parts)
                                 else:
-                                    # Fallback: assume REG_DWORD if not found
-                                    value_type = "REG_DWORD"
-                                    value_data = parts_line[-1] if len(parts_line) > 1 else ""
+                                    # value_name không có trong backup_key, dùng last part
+                                    value_name = parts[-1]
+                                    path_parts = parts[:-1]
+                                    if path_parts and path_parts[0].startswith(("HKLM", "HKEY")):
+                                        reg_path = "\\".join(path_parts)
+                                    else:
+                                        reg_path = "HKLM\\" + "\\".join(path_parts)
+                            else:
+                                # value_name là "None" hoặc không parse được từ reg_data, dùng last part của backup_key
+                                value_name = parts[-1]
+                                path_parts = parts[:-1]
+                                if path_parts and path_parts[0].startswith(("HKLM", "HKEY")):
+                                    reg_path = "\\".join(path_parts)
+                                else:
+                                    reg_path = "HKLM\\" + "\\".join(path_parts)
+                                
+                                # Nếu value_name là "None", có thể là do backup_key format sai hoặc key không tồn tại
+                                # Thử tìm value_name từ các rules trong backup
+                                if value_name == "None":
+                                    print(f"   ⚠️ Warning: value_name is 'None' for key {key}, attempting to extract from backup metadata...")
+                                    # Thử extract từ rule_ids trong backup
+                                    if "rule_ids" in backup:
+                                        # Load rules và tìm registry value_name
+                                        try:
+                                            rules = load_rules()
+                                            for rule_id in backup.get("rule_ids", []):
+                                                for r in rules:
+                                                    if r.get("id") == rule_id:
+                                                        check_cmd = r.get("check", {}).get("winrm", "")
+                                                        reg_match = re.search(r'reg query\s+"([^"]+)"\s+/v\s+(\S+)', check_cmd)
+                                                        if reg_match:
+                                                            rule_reg_path = reg_match.group(1)
+                                                            rule_value_name = reg_match.group(2)
+                                                            # Kiểm tra xem reg_path có match không
+                                                            if rule_reg_path.replace('\\', '_').replace(':', '_') in key_without_prefix:
+                                                                value_name = rule_value_name
+                                                                reg_path = rule_reg_path
+                                                                print(f"   ✓ Extracted value_name '{value_name}' from rule {rule_id}")
+                                                                break
+                                                if value_name != "None":
+                                                    break
+                                        except Exception as e:
+                                            print(f"   ⚠️ Failed to extract value_name from rules: {e}")
+                                    
+                                    # Nếu vẫn không tìm được, skip
+                                    if value_name == "None":
+                                        print(f"   ⚠️ Cannot determine value_name for key {key}, skipping")
+                                        continue
                         else:
+                            # Cannot parse reg_data, skip
+                            print(f"   ⚠️ Invalid registry data format for key {key}: {reg_data[:100]}")
                             continue
                     else:
                         continue
