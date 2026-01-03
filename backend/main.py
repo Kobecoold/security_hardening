@@ -716,12 +716,18 @@ async def remediate_windows(
     host: str = Form(...),
     username: str = Form(""),
     password: str = Form(..., json_schema_extra={"format": "password"}),
-    Rule_id: str = Form(..., description="ID của rule cần fix, ví dụ: winrm-cis-windows10-1.1.1"),
+    rule_id: Optional[str] = Form(None, description="ID của rule cần fix, ví dụ: winrm-cis-windows10-1.1.1"),
+    Rule_id: Optional[str] = Form(None, description="ID của rule cần fix (deprecated, use rule_id)"),
     create_backup: bool = Form(True),
 ):
     """Chạy remediation script để fix Windows rule FAIL - Tự động tạo backup - Lưu log vào MongoDB."""
     try:
-        print(f"🔄 Starting Windows remediation for {host} with rule: {Rule_id}")
+        # Support both rule_id (new) and Rule_id (old) for backward compatibility
+        actual_rule_id = rule_id or Rule_id
+        if not actual_rule_id:
+            raise HTTPException(status_code=400, detail="rule_id is required")
+        
+        print(f"🔄 Starting Windows remediation for {host} with rule: {actual_rule_id}")
         print(f"   Username: {username}")
         
         # Kết nối WinRM
@@ -741,7 +747,7 @@ async def remediate_windows(
         if create_backup:
             try:
                 print("🔍 Creating rule-specific backup...")
-                backup_id = rollback_manager.create_backup(host, session, rule_id=Rule_id)
+                backup_id = rollback_manager.create_backup(host, session, rule_id=actual_rule_id)
                 if backup_id:
                     print(f"✅ Backup created: {backup_id}")
                 else:
@@ -751,10 +757,10 @@ async def remediate_windows(
                 # KHÔNG RAISE ERROR - tiếp tục remediation
         
         # Load remediation script
-        print(f"📄 Step 2: Loading remediation script for rule: {Rule_id}")
-        script_content = load_windows_remediation_script(Rule_id)
+        print(f"📄 Step 2: Loading remediation script for rule: {actual_rule_id}")
+        script_content = load_windows_remediation_script(actual_rule_id)
         if not script_content:
-            raise HTTPException(status_code=404, detail=f"Không tìm thấy remediation script cho rule: {Rule_id}")
+            raise HTTPException(status_code=404, detail=f"Không tìm thấy remediation script cho rule: {actual_rule_id}")
         print(f"✅ Script loaded ({len(script_content)} bytes)")
         
         # Chạy script remediation với timeout 5 phút
@@ -784,7 +790,7 @@ async def remediate_windows(
         try:
             # Load rule để lấy check command
             rules = load_rules(os_type=os_type)
-            rule = next((r for r in rules if r.get("id") == Rule_id), None)
+            rule = next((r for r in rules if r.get("id") == actual_rule_id), None)
             
             if rule and rule.get("check", {}).get("winrm"):
                 check_command = rule["check"]["winrm"]
@@ -815,10 +821,10 @@ async def remediate_windows(
                     verification_passed = (verify_result.status_code == 0)
                 
                 if verification_passed:
-                    print(f"✅ Verification PASSED - Rule '{Rule_id}' is FIXED")
+                    print(f"✅ Verification PASSED - Rule '{actual_rule_id}' is FIXED")
                     print(f"   Output: {verification_output[:200]}")
                 else:
-                    print(f"⚠️ Verification FAILED - Rule '{Rule_id}' may still exist")
+                    print(f"⚠️ Verification FAILED - Rule '{actual_rule_id}' may still exist")
                     print(f"   Exit code: {verify_result.status_code}")
                     print(f"   Expected: {expected_output}")
                     print(f"   Output: {verification_output[:200]}")
@@ -835,7 +841,7 @@ async def remediate_windows(
             "host": host,
             "username": username,
             "os_type": os_type,
-            "rule_id": Rule_id,
+            "rule_id": actual_rule_id,
             "client_type": "windows",
             "backup_id": backup_id,
             "status": "SUCCESS" if (exit_code == 0 and verification_passed) else "PARTIAL",
@@ -861,13 +867,13 @@ async def remediate_windows(
         # Determine final status
         if exit_code == 0 and verification_passed:
             final_status = "SUCCESS"
-            message = f"✅ Remediation successful - Rule '{Rule_id}' is FIXED and VERIFIED on {host}"
+            message = f"✅ Remediation successful - Rule '{actual_rule_id}' is FIXED and VERIFIED on {host}"
         elif exit_code == 0:
             final_status = "PARTIAL"
-            message = f"⚠️ Script completed but verification FAILED - Rule '{Rule_id}' may still exist on {host}"
+            message = f"⚠️ Script completed but verification FAILED - Rule '{actual_rule_id}' may still exist on {host}"
         else:
             final_status = "PARTIAL"
-            message = f"⚠️ Script failed (exit code {exit_code}) - Rule '{Rule_id}' may not be fixed on {host}"
+            message = f"⚠️ Script failed (exit code {exit_code}) - Rule '{actual_rule_id}' may not be fixed on {host}"
         
         print(f"📋 Final Status: {final_status}")
         print(f"   Script exit code: {exit_code}")
@@ -876,7 +882,7 @@ async def remediate_windows(
         
         return {
             "remediation_id": remediation_id,
-            "rule_id": Rule_id,
+            "rule_id": actual_rule_id,
             "backup_id": backup_id,
             "status": final_status,
             "host": host,
