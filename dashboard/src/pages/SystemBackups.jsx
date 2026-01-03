@@ -14,7 +14,10 @@ export default function SystemBackups() {
   const [error, setError] = useState(null)
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [showScheduleForm, setShowScheduleForm] = useState(false)
+  const [showRestoreForm, setShowRestoreForm] = useState(false)
+  const [restoringBackup, setRestoringBackup] = useState(null)
   const [creating, setCreating] = useState(false)
+  const [restoring, setRestoring] = useState(false)
   const [filter, setFilter] = useState('all')
   const [hostFilter, setHostFilter] = useState('')
 

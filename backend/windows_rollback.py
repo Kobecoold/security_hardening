@@ -330,6 +330,171 @@ class RollbackManager:
             # Không raise exception để remediation vẫn chạy được
             return None
     
+    def create_backup_for_rules(self, host: str, session: winrm.Session, rule_ids: Optional[List[str]] = None) -> Optional[str]:
+        """Tạo backup chung cho nhiều rules - merge tất cả settings cần backup."""
+        if not rule_ids or len(rule_ids) == 0:
+            return None
+        
+        try:
+            print(f"🛡️ Starting batch backup for Windows host: {host} with {len(rule_ids)} rules")
+            
+            # Collect tất cả backup plans từ tất cả rules
+            all_backup_plans = []
+            all_registry_keys = set()
+            all_policies = set()
+            
+            for rule_id in rule_ids:
+                if rule_id:
+                    backup_plan = self._get_settings_to_backup_for_rule(rule_id)
+                    all_backup_plans.append(backup_plan)
+                    
+                    # Collect registry keys và policies
+                    if backup_plan.get("type") == "registry":
+                        reg_path = backup_plan.get("registry_path")
+                        value_name = backup_plan.get("value_name")
+                        if reg_path:
+                            all_registry_keys.add((reg_path, value_name))
+                    
+                    policies = backup_plan.get("policies", [])
+                    if policies:
+                        all_policies.update(policies)
+                    
+                    print(f"   📋 Rule {rule_id}: type={backup_plan.get('type')}")
+            
+            print(f"✅ Total unique settings to backup: {len(all_registry_keys)} registry keys, {len(all_policies)} policies")
+            
+            backup_data = {
+                "host": host,
+                "timestamp": datetime.utcnow(),
+                "type": "pre_remediation_backup",
+                "os_type": "windows",
+                "backup_id": f"win_backup_{int(datetime.utcnow().timestamp())}",
+                "rule_ids": rule_ids,  # Lưu danh sách rules
+                "rule_id": None,  # Không có rule_id đơn lẻ
+                "backup_type": "batch",
+                "data": {}
+            }
+            
+            try:
+                # Backup registry keys
+                for reg_path, value_name in all_registry_keys:
+                    try:
+                        print(f"🔍 Backing up registry: {reg_path}\\{value_name}...")
+                        cmd = f'reg query "{reg_path}" /v "{value_name}" 2>nul'
+                        result = session.run_cmd(cmd)
+                        if result.status_code == 0:
+                            output = result.std_out.decode('utf-8', errors='ignore').strip()
+                            # Parse registry value
+                            lines = output.split('\n')
+                            for line in lines:
+                                if value_name in line and ('REG_DWORD' in line or 'REG_SZ' in line or 'REG_MULTI_SZ' in line):
+                                    reg_path_normalized = reg_path.replace('\\', '_').replace(':', '')
+                                    backup_key = f"registry_{reg_path_normalized}_{value_name}"
+                                    backup_data["data"][backup_key] = line.strip()
+                                    print(f"   ✓ Registry backed up: {reg_path}\\{value_name}")
+                                    break
+                    except Exception as e:
+                        print(f"   ⚠️ Failed to backup registry {reg_path}\\{value_name}: {e}")
+                
+                # Backup policies
+                for policy in all_policies:
+                    try:
+                        print(f"🔍 Backing up policy: {policy}...")
+                        if policy == "password":
+                            self._backup_net_accounts(session, backup_data)
+                        elif policy == "guest":
+                            self._backup_net_user_guest(session, backup_data)
+                        # Có thể thêm các policies khác
+                    except Exception as e:
+                        print(f"   ⚠️ Failed to backup policy {policy}: {e}")
+                
+                # Backup secedit, netsh, auditpol nếu có rules liên quan
+                has_secedit = any(plan.get("type") == "secedit" for plan in all_backup_plans)
+                has_netsh = any(plan.get("type") == "netsh" for plan in all_backup_plans)
+                has_auditpol = any(plan.get("type") == "auditpol" for plan in all_backup_plans)
+                
+                if has_secedit:
+                    try:
+                        print("🔍 Backing up secedit policies...")
+                        # Backup secedit export
+                        cmd = 'secedit /export /cfg C:\\temp_secedit_backup.inf 2>nul'
+                        result = session.run_cmd(cmd)
+                        if result.status_code == 0:
+                            # Read the exported file
+                            read_cmd = 'type C:\\temp_secedit_backup.inf 2>nul'
+                            read_result = session.run_cmd(read_cmd)
+                            if read_result.status_code == 0:
+                                backup_data["data"]["secedit_export"] = read_result.std_out.decode('utf-8', errors='ignore')[:100000]
+                                print(f"   ✓ Secedit policies backed up")
+                            # Cleanup
+                            session.run_cmd('del C:\\temp_secedit_backup.inf 2>nul')
+                    except Exception as e:
+                        print(f"   ⚠️ Failed to backup secedit: {e}")
+                
+                if has_netsh:
+                    try:
+                        print("🔍 Backing up firewall rules...")
+                        cmd = 'netsh advfirewall firewall show rule name=all dir=in type=static 2>nul'
+                        result = session.run_cmd(cmd)
+                        if result.status_code == 0:
+                            backup_data["data"]["firewall_rules_in"] = result.std_out.decode('utf-8', errors='ignore')[:100000]
+                            print(f"   ✓ Firewall rules (inbound) backed up")
+                    except Exception as e:
+                        print(f"   ⚠️ Failed to backup firewall: {e}")
+                
+                if has_auditpol:
+                    try:
+                        print("🔍 Backing up audit policies...")
+                        cmd = 'auditpol /get /category:* 2>nul'
+                        result = session.run_cmd(cmd)
+                        if result.status_code == 0:
+                            backup_data["data"]["auditpol"] = result.std_out.decode('utf-8', errors='ignore')[:100000]
+                            print(f"   ✓ Audit policies backed up")
+                    except Exception as e:
+                        print(f"   ⚠️ Failed to backup auditpol: {e}")
+                
+                # Backup info
+                rule_count = len(rule_ids)
+                if rule_count == 1:
+                    backup_scope_msg = f"Backup for 1 rule: {rule_ids[0]}"
+                    notes_msg = f"Backup created before remediation for 1 rule - Only settings that will be modified"
+                    desc_msg = f"Backup for 1 rule"
+                else:
+                    backup_scope_msg = f"Backup for {rule_count} rules: {', '.join(rule_ids[:5])}{'...' if rule_count > 5 else ''}"
+                    notes_msg = f"Backup created before remediation for {rule_count} rules - Only settings that will be modified"
+                    desc_msg = f"Backup for {rule_count} rules"
+                
+                backup_data["data"]["backup_info"] = {
+                    "backup_time": str(datetime.utcnow()),
+                    "host": host,
+                    "rule_ids": rule_ids,
+                    "rule_count": rule_count,
+                    "backup_type": "batch" if rule_count > 1 else "single",
+                    "description": desc_msg,
+                    "notes": notes_msg,
+                    "scope": backup_scope_msg
+                }
+                
+            except Exception as backup_error:
+                print(f"⚠️ Error during batch backup: {backup_error}")
+                # Vẫn tiếp tục với fallback backup
+                self._backup_fallback_settings(session, backup_data)
+            
+            # Save to MongoDB
+            backup_id = self._save_backup(backup_data)
+            rule_count = len(rule_ids)
+            if rule_count == 1:
+                print(f"✅ Backup created for {host}: {backup_id} (covers 1 rule: {rule_ids[0]})")
+            else:
+                print(f"✅ Backup created for {host}: {backup_id} (covers {rule_count} rules)")
+            return backup_id
+            
+        except Exception as e:
+            print(f"❌ Batch backup creation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
     def _backup_net_accounts(self, session: winrm.Session, backup_data: Dict):
         """Backup net accounts settings."""
         try:

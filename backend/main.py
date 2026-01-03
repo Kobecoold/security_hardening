@@ -711,6 +711,97 @@ async def test_linux_connection(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Connection test failed: {str(e)}")
 
+@app.post("/backups/create/batch", dependencies=[RequireAuth])
+async def create_batch_backup(
+    host: str = Form(...),
+    os_type: str = Form(...),
+    rule_ids: str = Form(..., description="Comma-separated list of rule IDs"),
+    # Linux params
+    Username: Optional[str] = Form(""),
+    Key_path: Optional[str] = Form("~/.ssh/id_ed25519"),
+    Password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+    Sudo_password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+    # Windows params
+    username: Optional[str] = Form(""),
+    password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+):
+    """Tạo backup chung cho nhiều rules trước khi remediation."""
+    try:
+        rule_ids_list = [r.strip() for r in rule_ids.split(',') if r.strip()]
+        if not rule_ids_list:
+            raise HTTPException(status_code=400, detail="At least one rule_id is required")
+        
+        rule_count = len(rule_ids_list)
+        if rule_count == 1:
+            print(f"🛡️ Creating backup for {host} with 1 rule: {rule_ids_list[0]}")
+        else:
+            print(f"🛡️ Creating backup for {host} with {rule_count} rules")
+        
+        if os_type.startswith('ubuntu') or os_type.startswith('debian'):
+            # Linux backup
+            ssh = ssh_connect(host, Username, Key_path or "", password=Password)
+            try:
+                backup_id = linux_rollback_manager.create_backup_for_rules(
+                    host, Username, Key_path or "", Password, Sudo_password, rule_ids=rule_ids_list
+                )
+            finally:
+                ssh.close()
+            
+            if backup_id:
+                rule_count = len(rule_ids_list)
+                if rule_count == 1:
+                    message = f"Backup created successfully for 1 rule"
+                else:
+                    message = f"Backup created successfully for {rule_count} rules"
+                return {
+                    "status": "SUCCESS",
+                    "backup_id": backup_id,
+                    "host": host,
+                    "rule_ids": rule_ids_list,
+                    "rule_count": rule_count,
+                    "message": message
+                }
+            else:
+                raise HTTPException(status_code=500, detail="Failed to create batch backup")
+        
+        elif os_type.startswith('windows'):
+            # Windows backup
+            session = winrm_connect(host, username or "Administrator", password)
+            try:
+                backup_id = rollback_manager.create_backup_for_rules(
+                    host, session, rule_ids=rule_ids_list
+                )
+            finally:
+                session.close()
+            
+            if backup_id:
+                rule_count = len(rule_ids_list)
+                if rule_count == 1:
+                    message = f"Backup created successfully for 1 rule"
+                else:
+                    message = f"Backup created successfully for {rule_count} rules"
+                return {
+                    "status": "SUCCESS",
+                    "backup_id": backup_id,
+                    "host": host,
+                    "rule_ids": rule_ids_list,
+                    "rule_count": rule_count,
+                    "message": message
+                }
+            else:
+                raise HTTPException(status_code=500, detail="Failed to create batch backup")
+        
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported OS type: {os_type}")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Batch backup creation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Batch backup creation failed: {str(e)}")
+
 @app.post("/remediate/windows", dependencies=[RequireAuth])
 async def remediate_windows(
     host: str = Form(...),

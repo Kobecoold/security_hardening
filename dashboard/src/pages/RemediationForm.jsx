@@ -305,6 +305,31 @@ export default function RemediationForm() {
           return
         }
 
+        // Tạo backup chung cho tất cả rules trước (nếu được yêu cầu)
+        let batchBackupId = null
+        if (formData.create_backup && validRuleIds.length > 0) {
+          try {
+            console.log(`🛡️ Creating batch backup for ${validRuleIds.length} rules...`)
+            const backupFormData = new FormData()
+            backupFormData.append('host', formData.host)
+            backupFormData.append('os_type', formData.os_type)
+            backupFormData.append('rule_ids', validRuleIds.join(','))
+            backupFormData.append('Username', formData.username)
+            if (formData.key_path) backupFormData.append('Key_path', formData.key_path)
+            if (formData.password) backupFormData.append('Password', formData.password)
+            if (formData.sudo_password) backupFormData.append('Sudo_password', formData.sudo_password)
+            
+            const backupResponse = await api.post('/backups/create/batch', backupFormData, {
+              headers: { 'Content-Type': 'multipart/form-data' }
+            })
+            batchBackupId = backupResponse.data.backup_id
+            console.log(`✅ Batch backup created: ${batchBackupId}`)
+          } catch (err) {
+            console.error('⚠️ Batch backup creation failed (non-critical):', err)
+            // Tiếp tục remediation dù backup thất bại
+          }
+        }
+
         const results = []
         for (let i = 0; i < validRuleIds.length; i++) {
           const ruleId = validRuleIds[i]
@@ -324,8 +349,8 @@ export default function RemediationForm() {
           formDataToSend.append('Use_sudo', formData.use_sudo)
           if (formData.sudo_password) formDataToSend.append('Sudo_password', formData.sudo_password)
           formDataToSend.append('Rule_id', ruleId.trim())
-          // Only create backup for first rule
-          formDataToSend.append('create_backup', formData.create_backup && i === 0)
+          // Không tạo backup nữa vì đã tạo batch backup ở trên
+          formDataToSend.append('create_backup', false)
 
           try {
             const response = await api.post('/remediate/linux', formDataToSend, {
@@ -365,6 +390,29 @@ export default function RemediationForm() {
           return
         }
 
+        // Tạo backup chung cho tất cả rules trước (nếu được yêu cầu)
+        let batchBackupId = null
+        if (formData.create_backup && validRuleIds.length > 0) {
+          try {
+            console.log(`🛡️ Creating batch backup for ${validRuleIds.length} Windows rules...`)
+            const backupFormData = new FormData()
+            backupFormData.append('host', formData.host)
+            backupFormData.append('os_type', formData.os_type)
+            backupFormData.append('rule_ids', validRuleIds.join(','))
+            backupFormData.append('username', formData.username || 'Administrator')
+            backupFormData.append('password', formData.password)
+            
+            const backupResponse = await api.post('/backups/create/batch', backupFormData, {
+              headers: { 'Content-Type': 'multipart/form-data' }
+            })
+            batchBackupId = backupResponse.data.backup_id
+            console.log(`✅ Batch backup created: ${batchBackupId}`)
+          } catch (err) {
+            console.error('⚠️ Batch backup creation failed (non-critical):', err)
+            // Tiếp tục remediation dù backup thất bại
+          }
+        }
+
         const results = []
         for (let i = 0; i < validRuleIds.length; i++) {
           const ruleId = validRuleIds[i]
@@ -381,8 +429,8 @@ export default function RemediationForm() {
         formDataToSend.append('username', formData.username || 'Administrator')
         formDataToSend.append('password', formData.password)
           formDataToSend.append('rule_id', ruleId.trim())
-          // Only create backup for first rule
-          formDataToSend.append('create_backup', formData.create_backup && i === 0)
+          // Không tạo backup nữa vì đã tạo batch backup ở trên
+          formDataToSend.append('create_backup', false)
 
           try {
         const response = await api.post('/remediate/windows', formDataToSend, {

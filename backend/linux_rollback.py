@@ -225,6 +225,163 @@ class LinuxRollbackManager:
             # Không raise exception để remediation vẫn chạy được
             return None
     
+    def create_backup_for_rules(
+        self, 
+        host: str, 
+        username: str,
+        key_path: str = "",
+        password: Optional[str] = None,
+        sudo_password: Optional[str] = None,
+        rule_ids: Optional[List[str]] = None
+    ) -> Optional[str]:
+        """Tạo backup chung cho nhiều rules - merge tất cả files/settings cần backup."""
+        if not rule_ids or len(rule_ids) == 0:
+            return None
+        
+        try:
+            print(f"🛡️ Starting batch backup for Linux host: {host} with {len(rule_ids)} rules")
+            
+            ssh = ssh_connect(host, username, key_path, password)
+            
+            # Collect tất cả files cần backup từ tất cả rules (merge, không trùng lặp)
+            all_files_to_backup = set()
+            for rule_id in rule_ids:
+                if rule_id:
+                    files = self._get_files_to_backup_for_rule(rule_id)
+                    all_files_to_backup.update(files)
+                    print(f"   📋 Rule {rule_id}: {len(files)} files")
+            
+            all_files_to_backup = list(all_files_to_backup)
+            print(f"✅ Total unique files to backup: {len(all_files_to_backup)}")
+            
+            backup_data = {
+                "host": host,
+                "timestamp": datetime.utcnow(),
+                "type": "pre_remediation_backup",
+                "os_type": "linux",
+                "backup_id": f"backup_{int(datetime.utcnow().timestamp())}",
+                "rule_ids": rule_ids,  # Lưu danh sách rules
+                "rule_id": None,  # Không có rule_id đơn lẻ
+                "data": {}
+            }
+            
+            try:
+                # Backup các file (giống như create_backup nhưng cho nhiều rules)
+                for file_path in all_files_to_backup:
+                    try:
+                        print(f"🔍 Backing up {file_path}...")
+                        backup_script = f"""
+                        timeout 10 sh -c 'if [ -f {file_path} ]; then head -c 100000 {file_path}; fi'
+                        """
+                        result = run_bash_check_stdin(
+                            ssh, backup_script, use_sudo=False, timeout=15
+                        )
+                        
+                        if result["exit_status"] == 0 and result["stdout"]:
+                            content = result["stdout"][:100000]
+                            file_key = file_path.lstrip("/").replace("/", "_").replace(".", "_")
+                            backup_data["data"][f"file_{file_key}"] = content
+                            print(f"   ✓ {file_path} backed up ({len(content)} bytes)")
+                        else:
+                            result_sudo = run_bash_check_stdin(
+                                ssh, backup_script, use_sudo=True, sudo_password=sudo_password, timeout=15
+                            )
+                            if result_sudo["exit_status"] == 0 and result_sudo["stdout"]:
+                                content = result_sudo["stdout"][:100000]
+                                file_key = file_path.lstrip("/").replace("/", "_").replace(".", "_")
+                                backup_data["data"][f"file_{file_key}"] = content
+                                print(f"   ✓ {file_path} backed up with sudo ({len(content)} bytes)")
+                            else:
+                                print(f"   ⚠️ Skipped {file_path} (not accessible)")
+                    except Exception as e:
+                        print(f"   ⚠️ Failed to backup {file_path}: {e}")
+                
+                # Backup file permissions
+                for file_path in all_files_to_backup:
+                    try:
+                        print(f"🔍 Backing up permissions for {file_path}...")
+                        perm_script = f"""
+                        timeout 5 sh -c 'if [ -e {file_path} ]; then stat -c "%a %U:%G" {file_path} 2>/dev/null || stat -f "%OLp %Su:%Sg" {file_path} 2>/dev/null || echo "unknown"; fi'
+                        """
+                        result = run_bash_check_stdin(ssh, perm_script, use_sudo=True, sudo_password=sudo_password, timeout=10)
+                        if result["exit_status"] != 0 or not result["stdout"] or result["stdout"].strip() == "unknown":
+                            result = run_bash_check_stdin(ssh, perm_script, use_sudo=False, timeout=10)
+                        if result["exit_status"] == 0 and result["stdout"] and result["stdout"].strip() != "unknown":
+                            file_key = file_path.lstrip("/").replace("/", "_").replace(".", "_")
+                            backup_data["data"][f"perms_{file_key}"] = result["stdout"].strip()
+                            print(f"   ✓ Permissions backed up for {file_path}: {result['stdout'].strip()}")
+                    except Exception as e:
+                        print(f"   ⚠️ Failed to backup permissions for {file_path}: {e}")
+                
+                # Backup sysctl settings nếu có rules liên quan
+                if any(rule_id and any(x in rule_id for x in ['3.1.', '3.2.', '3.3.']) for rule_id in rule_ids):
+                    try:
+                        print("🔍 Backing up sysctl settings...")
+                        if "/etc/sysctl.conf" not in all_files_to_backup:
+                            all_files_to_backup.append("/etc/sysctl.conf")
+                        
+                        sysctl_script = """
+                        timeout 10 sh -c 'sysctl -a 2>/dev/null | grep -E "^(net\.ipv4\.|net\.ipv6\.)" | head -50'
+                        """
+                        result = run_bash_check_stdin(ssh, sysctl_script, use_sudo=True, sudo_password=sudo_password, timeout=15)
+                        if result["exit_status"] == 0 and result["stdout"]:
+                            backup_data["data"]["sysctl_runtime"] = result["stdout"][:50000]
+                            print(f"   ✓ Sysctl runtime values backed up")
+                    except Exception as e:
+                        print(f"   ⚠️ Failed to backup sysctl settings: {e}")
+                
+                # Backup services nếu có rules liên quan
+                if any(rule_id and any(x in rule_id for x in ['2.2.', '2.1.']) for rule_id in rule_ids):
+                    try:
+                        print("🔍 Backing up system services status...")
+                        services_script = """
+                        timeout 10 sh -c 'systemctl list-unit-files --type=service --state=enabled 2>/dev/null | grep -E "\.service" | awk "{print \\$1}" | head -100'
+                        """
+                        result = run_bash_check_stdin(ssh, services_script, use_sudo=True, sudo_password=sudo_password, timeout=15)
+                        if result["exit_status"] == 0 and result["stdout"]:
+                            backup_data["data"]["enabled_services"] = result["stdout"][:50000]
+                            print(f"   ✓ Enabled services backed up")
+                    except Exception as e:
+                        print(f"   ⚠️ Failed to backup services: {e}")
+                
+                # Backup info
+                rule_count = len(rule_ids)
+                if rule_count == 1:
+                    backup_scope_msg = f"Backup for 1 rule: {rule_ids[0]}"
+                    notes_msg = f"Backup created before remediation for 1 rule - Only files that will be modified"
+                else:
+                    backup_scope_msg = f"Backup for {rule_count} rules: {', '.join(rule_ids[:5])}{'...' if rule_count > 5 else ''}"
+                    notes_msg = f"Backup created before remediation for {rule_count} rules - Only files that will be modified"
+                
+                backup_data["data"]["backup_info"] = {
+                    "backup_time": str(datetime.utcnow()),
+                    "host": host,
+                    "username": username,
+                    "rule_ids": rule_ids,
+                    "rule_count": rule_count,
+                    "notes": notes_msg,
+                    "backup_scope": backup_scope_msg
+                }
+                
+            finally:
+                ssh.close()
+            
+            # Save to MongoDB
+            backup_id = self._save_backup(backup_data)
+            rule_count = len(rule_ids)
+            if rule_count == 1:
+                print(f"✅ Backup created for {host}: {backup_id} (covers 1 rule: {rule_ids[0]})")
+            else:
+                print(f"✅ Backup created for {host}: {backup_id} (covers {rule_count} rules)")
+            
+            return backup_id
+            
+        except Exception as e:
+            print(f"❌ Batch backup creation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
     def _extract_files_from_script(self, script_content: str) -> List[str]:
         """Extract file paths từ remediation script bằng cách tìm các patterns phổ biến."""
         files = []
