@@ -169,12 +169,22 @@ def load_remediation_script(os_name: str, rule_id: str) -> Optional[str]:
     print(f"❌ Script not found for rule {rule_id} in {script_dir}")
     return None
 
-def load_windows_remediation_script(script_name: str) -> Optional[str]:
+def load_windows_remediation_script(rule_id: str) -> Optional[str]:
     """Load Windows remediation script từ file system."""
-    # Thử cả "window-10" và "windows-10" để tương thích
+    # Chuẩn hóa rule_id để tìm file
+    # Ví dụ: winrm-cis-windows10-1.1.1 -> cis-windows10-1.1.1.ps1
+    
+    # Extract phần cuối của rule_id
+    script_name = None
+    if rule_id.startswith("winrm-cis-windows10-"):
+        script_name = f"cis-windows10-{rule_id.split('winrm-cis-windows10-')[1]}.ps1"
+    else:
+        script_name = f"{rule_id}.ps1"
+    
+    # Thử các thư mục có thể
     possible_paths = [
-        os.path.join(SCRIPTS_DIR, "window-10", script_name),  # Thư mục thực tế
-        os.path.join(SCRIPTS_DIR, "windows-10", script_name),  # Fallback
+        os.path.join(SCRIPTS_DIR, "windows-10", script_name),
+        os.path.join(SCRIPTS_DIR, "window-10", script_name),
     ]
     
     for script_path in possible_paths:
@@ -186,5 +196,5 @@ def load_windows_remediation_script(script_name: str) -> Optional[str]:
                 print(f"Warning: Failed to read script {script_path}: {e}")
                 continue
     
-    print(f"Error: Script not found: {script_name}. Tried paths: {possible_paths}")
+    print(f"Error: Script not found for rule {rule_id}. Tried paths: {possible_paths}")
     return None
