@@ -767,12 +767,10 @@ async def create_batch_backup(
         elif os_type.startswith('windows'):
             # Windows backup
             session = winrm_connect(host, username or "Administrator", password)
-            try:
-                backup_id = rollback_manager.create_backup_for_rules(
-                    host, session, rule_ids=rule_ids_list
-                )
-            finally:
-                session.close()
+            # WinRM Session không có method close(), sẽ tự cleanup khi không còn reference
+            backup_id = rollback_manager.create_backup_for_rules(
+                host, session, rule_ids=rule_ids_list
+            )
             
             if backup_id:
                 rule_count = len(rule_ids_list)
