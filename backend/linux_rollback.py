@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Dict, Optional, List, Any
 from database import db
 from linux_audit import ssh_connect, run_bash_check_stdin
-from utils import load_remediation_script, SCRIPTS_DIR
+from utils import load_remediation_script, SCRIPTS_DIR, load_rules
 import re
 import os
 
@@ -415,16 +415,54 @@ class LinuxRollbackManager:
         
         files_to_backup = []
         
-        # Thử extract files từ remediation script trước
+        # Thử extract files từ rule YAML file (tương tự Windows)
         try:
             # Extract OS name từ rule_id (e.g., cis-ubuntu-20.04-1.4.1 -> ubuntu-20.04)
             os_name_match = re.search(r'cis-([^-]+-\d+\.\d+)', rule_id)
             if os_name_match:
                 os_name = os_name_match.group(1)
+                
+                # Thử load rules từ YAML
+                try:
+                    from utils import load_rules_by_os
+                    rules = load_rules_by_os(os_name)
+                    rule_data = None
+                    for r in rules:
+                        if r.get("id") == rule_id:
+                            rule_data = r
+                            break
+                    
+                    if rule_data:
+                        # Extract file paths từ check command
+                        check_cmd = rule_data.get("check", {}).get("ssh", "")
+                        # Parse file paths từ check command (ví dụ: stat, test, cat, etc.)
+                        # Pattern: file paths thường là absolute paths (/etc/...)
+                        file_patterns = [
+                            r'([/\w\.\-]+\.conf)',  # .conf files
+                            r'([/\w\.\-]+\.cfg)',   # .cfg files
+                            r'([/\w\.\-]+/passwd)', # /etc/passwd
+                            r'([/\w\.\-]+/fstab)',  # /etc/fstab
+                            r'([/\w\.\-]+/sshd_config)', # /etc/ssh/sshd_config
+                            r'([/\w\.\-]+/grub\.cfg)', # /boot/grub/grub.cfg
+                            r'([/\w\.\-]+/motd)',   # /etc/motd
+                            r'([/\w\.\-]+/issue)',  # /etc/issue
+                        ]
+                        for pattern in file_patterns:
+                            matches = re.findall(pattern, check_cmd)
+                            for match in matches:
+                                if match.startswith('/') and match not in files_to_backup:
+                                    files_to_backup.append(match)
+                                    print(f"   📋 Rule {rule_id}: extracted file {match} from YAML")
+                except Exception as e:
+                    print(f"   ⚠️ Failed to extract files from rule YAML: {e}")
+                
+                # Thử extract files từ remediation script
                 script_content = load_remediation_script(os_name, rule_id)
                 if script_content:
                     script_files = self._extract_files_from_script(script_content)
-                    files_to_backup.extend(script_files)
+                    for f in script_files:
+                        if f not in files_to_backup:
+                            files_to_backup.append(f)
                     print(f"   📝 Extracted {len(script_files)} files from remediation script")
         except Exception as e:
             print(f"   ⚠️ Failed to extract files from script: {e}")
@@ -736,7 +774,32 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                             }
                             continue
                         
-                        print(f"   ✓ File content restored for {file_path}")
+                        # Verify file content was restored correctly
+                        verify_content_script = f"""
+                        if [ -f {file_path} ]; then
+                            # Compare first 1000 chars to avoid huge outputs
+                            head -c 1000 {file_path}
+                        else
+                            echo "ERROR:File not found"
+                        fi
+                        """
+                        verify_result = run_bash_check_stdin(
+                            ssh, verify_content_script, use_sudo=True, sudo_password=sudo_password, timeout=10
+                        )
+                        content_verified = False
+                        if verify_result["exit_status"] == 0:
+                            restored_content_preview = verify_result.get("stdout", "")[:1000]
+                            original_content_preview = file_content[:1000]
+                            # Compare first 1000 chars (or full content if shorter)
+                            if restored_content_preview == original_content_preview:
+                                content_verified = True
+                            elif len(file_content) <= 1000 and restored_content_preview == file_content:
+                                content_verified = True
+                        
+                        if content_verified:
+                            print(f"   ✓ File content restored and verified for {file_path}")
+                        else:
+                            print(f"   ⚠️ File content restored but verification failed for {file_path}")
                         
                         # Step 2: Restore permissions and ownership
                         perms_key = f"perms_{file_key.replace('file_', '')}"
@@ -818,6 +881,7 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                                         rollback_details[file_path] = {
                                             "status": "RESTORED",
                                             "content_restored": True,
+                                            "content_verified": content_verified if 'content_verified' in locals() else True,
                                             "permissions": perms,
                                             "owner": owner,
                                             "group": group,
@@ -829,6 +893,7 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                                         rollback_details[file_path] = {
                                             "status": "PARTIAL",
                                             "content_restored": True,
+                                            "content_verified": content_verified if 'content_verified' in locals() else True,
                                             "permissions_restored": False,
                                             "expected": f"{perms} {owner}:{group}",
                                             "actual": verified_perms,
@@ -840,6 +905,7 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                                     rollback_details[file_path] = {
                                         "status": "PARTIAL",
                                         "content_restored": True,
+                                        "content_verified": content_verified if 'content_verified' in locals() else True,
                                         "permissions_restored": False,
                                         "error": result_perms.get("stderr", ""),
                                         "stdout": result_perms.get("stdout", ""),
@@ -852,6 +918,7 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                                 rollback_details[file_path] = {
                                     "status": "PARTIAL",
                                     "content_restored": True,
+                                    "content_verified": content_verified if 'content_verified' in locals() else True,
                                     "permissions_restored": False,
                                     "message": f"File content restored but no permissions data in backup"
                                 }
@@ -861,6 +928,7 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                             rollback_details[file_path] = {
                                 "status": "PARTIAL",
                                 "content_restored": True,
+                                "content_verified": content_verified if 'content_verified' in locals() else True,
                                 "permissions_restored": False,
                                 "message": f"File content restored but no permissions data in backup"
                             }
@@ -1021,6 +1089,49 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                                 "message": f"Error restoring {package_name} package: {e}"
                             }
                 
+                # Reload services và apply changes sau khi restore files (tương tự Windows gpupdate)
+                files_restored = sum(1 for k, v in rollback_details.items() 
+                                   if isinstance(v, dict) and v.get("status") in ["RESTORED", "PARTIAL"])
+                if files_restored > 0:
+                    try:
+                        print("🔄 Reloading services and applying changes after file restoration...")
+                        
+                        # Reload systemd daemon nếu có file systemd được restore
+                        systemd_files = [k for k in rollback_details.keys() if 'systemd' in k.lower() or '/etc/systemd' in k]
+                        if systemd_files:
+                            reload_daemon_script = "systemctl daemon-reload 2>/dev/null || true"
+                            result = run_bash_check_stdin(
+                                ssh, reload_daemon_script, use_sudo=True, sudo_password=sudo_password, timeout=15
+                            )
+                            if result["exit_status"] == 0:
+                                print("   ✓ Systemd daemon reloaded")
+                        
+                        # Reload sysctl nếu có sysctl.conf được restore
+                        if "/etc/sysctl.conf" in rollback_details:
+                            sysctl_reload_script = "sysctl -p /etc/sysctl.conf >/dev/null 2>&1 || true"
+                            result = run_bash_check_stdin(
+                                ssh, sysctl_reload_script, use_sudo=True, sudo_password=sudo_password, timeout=15
+                            )
+                            if result["exit_status"] == 0:
+                                print("   ✓ Sysctl settings reloaded")
+                        
+                        # Reload cron nếu có crontab được restore
+                        if "/etc/crontab" in rollback_details:
+                            cron_reload_script = "systemctl restart cron 2>/dev/null || systemctl restart crond 2>/dev/null || service cron restart 2>/dev/null || true"
+                            result = run_bash_check_stdin(
+                                ssh, cron_reload_script, use_sudo=True, sudo_password=sudo_password, timeout=15
+                            )
+                            if result["exit_status"] == 0:
+                                print("   ✓ Cron service reloaded")
+                        
+                        # Reload fstab changes (mount -a để apply ngay, nhưng cẩn thận)
+                        if "/etc/fstab" in rollback_details:
+                            print("   ℹ️ /etc/fstab restored - mount changes will apply on next reboot or manual remount")
+                        
+                        print("   ✓ System changes applied")
+                    except Exception as e:
+                        print(f"   ⚠️ Failed to reload services (non-critical): {e}")
+                
             finally:
                 ssh.close()
             
@@ -1056,18 +1167,26 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                 final_status = "FAILED"
                 message = f"Rollback failed for Linux host {host} (0/{total_count} operations succeeded)"
             
+            # Xác định backup_type (tương tự Windows)
+            backup_rule_id = backup.get("rule_id")
+            backup_rule_ids = backup.get("rule_ids")
+            is_batch_backup = backup_rule_ids is not None and len(backup_rule_ids) > 0
+            backup_type = "batch" if is_batch_backup else "single"
+            
             return {
                 "status": final_status,
                 "message": message,
                 "host": host,
                 "backup_id": backup.get("backup_id", "unknown"),
-                "rule_id": backup.get("rule_id") or backup.get("rule_ids"),
+                "rule_id": backup_rule_id or backup_rule_ids,
+                "backup_type": backup_type,
                 "rollback_details": rollback_details,
                 "summary": {
                     "total_operations": total_count,
                     "successful_operations": success_count,
                     "failed_operations": total_count - success_count
-                }
+                },
+                "error": None if final_status == "SUCCESS" else ("ROLLBACK_EXECUTION_ERROR" if final_status == "FAILED" else None)
             }
             
         except Exception as e:
@@ -1080,9 +1199,16 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                 "message": error_msg,
                 "host": host,
                 "rule_id": rule_id,
+                "backup_id": None,
+                "backup_type": None,
+                "rollback_details": {},
+                "summary": {
+                    "total_operations": 0,
+                    "successful_operations": 0,
+                    "failed_operations": 0
+                },
                 "error": "ROLLBACK_EXECUTION_ERROR",
-                "error_details": str(e),
-                "rollback_details": {}
+                "error_details": str(e)
             }
     
     def _update_remediation_status(self, host: str, status: str):

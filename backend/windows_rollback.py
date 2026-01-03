@@ -376,14 +376,16 @@ class RollbackManager:
                     all_backup_plans.append(backup_plan)
                     
                     # Collect registry keys và policies
+                    registry_extracted = False
                     if backup_plan.get("type") == "registry":
                         reg_path = backup_plan.get("registry_path")
                         value_name = backup_plan.get("registry_value") or backup_plan.get("value_name")
-                        if reg_path and value_name:
+                        if reg_path and value_name and value_name != "None" and value_name.strip() != "":
                             all_registry_keys.add((reg_path, value_name))
+                            registry_extracted = True
                     
-                    # Nếu không có trong mapping, thử extract từ rule YAML
-                    if not all_registry_keys or backup_plan.get("type") not in ["registry", "net_accounts", "net_user", "secedit", "netsh", "auditpol"]:
+                    # Nếu không có registry keys hợp lệ, thử extract từ rule YAML
+                    if not registry_extracted:
                         try:
                             rules = load_rules()
                             rule_data = None
@@ -399,8 +401,14 @@ class RollbackManager:
                                 if reg_match:
                                     reg_path = reg_match.group(1)
                                     value_name = reg_match.group(2)
-                                    all_registry_keys.add((reg_path, value_name))
-                                    print(f"   📋 Rule {rule_id}: extracted registry {reg_path}\\{value_name} from YAML")
+                                    # Validate value_name trước khi add
+                                    if value_name and value_name != "None" and value_name.strip() != "":
+                                        all_registry_keys.add((reg_path, value_name))
+                                        print(f"   📋 Rule {rule_id}: extracted registry {reg_path}\\{value_name} from YAML")
+                                    else:
+                                        print(f"   ⚠️ Rule {rule_id}: extracted invalid value_name '{value_name}' from YAML, skipping")
+                                else:
+                                    print(f"   ⚠️ Rule {rule_id}: no registry pattern found in check command: {check_cmd[:100]}")
                         except Exception as e:
                             print(f"   ⚠️ Failed to extract registry from rule YAML for {rule_id}: {e}")
                     
@@ -427,6 +435,11 @@ class RollbackManager:
             try:
                 # Backup registry keys - lưu dạng dict để rollback dễ parse
                 for reg_path, value_name in all_registry_keys:
+                    # Validate value_name - skip nếu None hoặc empty
+                    if not value_name or value_name == "None" or value_name.strip() == "":
+                        print(f"   ⚠️ Skipping registry backup: invalid value_name '{value_name}' for path {reg_path}")
+                        continue
+                    
                     try:
                         print(f"🔍 Backing up registry: {reg_path}\\{value_name}...")
                         cmd = f'reg query "{reg_path}" /v "{value_name}" 2>nul'
@@ -443,9 +456,10 @@ class RollbackManager:
                                         reg_type = parts[1]  # REG_DWORD, REG_SZ, etc.
                                         reg_value = parts[2]  # 0x1, value string, etc.
                                         
-                                        # Normalize path for backup key
+                                        # Normalize path for backup key (sanitize value_name để tránh ký tự đặc biệt)
                                         reg_path_normalized = reg_path.replace('\\', '_').replace(':', '_')
-                                        backup_key = f"registry_{reg_path_normalized}_{value_name}"
+                                        value_name_safe = value_name.replace('\\', '_').replace('/', '_').replace(':', '_')
+                                        backup_key = f"registry_{reg_path_normalized}_{value_name_safe}"
                                         
                                         # Lưu dạng dict để rollback dễ parse
                                         backup_data["data"][backup_key] = {
@@ -460,7 +474,8 @@ class RollbackManager:
                         else:
                             # Registry key không tồn tại - vẫn backup để biết trạng thái
                             reg_path_normalized = reg_path.replace('\\', '_').replace(':', '_')
-                            backup_key = f"registry_{reg_path_normalized}_{value_name}"
+                            value_name_safe = value_name.replace('\\', '_').replace('/', '_').replace(':', '_')
+                            backup_key = f"registry_{reg_path_normalized}_{value_name_safe}"
                             backup_data["data"][backup_key] = {
                                 "path": reg_path,
                                 "value_name": value_name,
@@ -911,7 +926,7 @@ class RollbackManager:
                     # Parse từ backup_key: registry_HKLM_SYSTEM_CurrentControlSet_Services_LanmanServer_Parameters_value_name
                     # Format: registry_{normalized_path}_{value_name}
                     if isinstance(reg_data, dict):
-                        # Format dict (từ single rule backup hoặc batch backup mới)
+                        # Format dict (từ single rule backup hoặc batch backup mới) - ƯU TIÊN ĐỌC TỪ DICT
                         reg_path = reg_data.get("path")
                         value_name = reg_data.get("value_name")
                         # Support cả "value_type" và "type" (backward compatibility)
@@ -919,6 +934,54 @@ class RollbackManager:
                         # Support cả "value_data" và "value" (backward compatibility)
                         value_data = reg_data.get("value_data") or reg_data.get("value")
                         exists = reg_data.get("exists", True)
+                        
+                        # Validate value_name từ dict - nếu None hoặc invalid, thử extract từ backup_key hoặc rule YAML
+                        if not value_name or value_name == "None" or value_name.strip() == "":
+                            print(f"   ⚠️ Invalid value_name '{value_name}' in backup data for key {key}, attempting to extract...")
+                            # Thử extract từ backup_key
+                            key_without_prefix = key.replace("registry_", "")
+                            parts = key_without_prefix.split("_")
+                            if len(parts) >= 2:
+                                # Last part có thể là value_name
+                                potential_value_name = parts[-1]
+                                if potential_value_name and potential_value_name != "None":
+                                    value_name = potential_value_name
+                                    # Reconstruct path nếu chưa có
+                                    if not reg_path:
+                                        path_parts = parts[:-1]
+                                        if path_parts and path_parts[0].startswith(("HKLM", "HKEY")):
+                                            reg_path = "\\".join(path_parts)
+                                        else:
+                                            reg_path = "HKLM\\" + "\\".join(path_parts)
+                                    print(f"   ✓ Extracted value_name '{value_name}' from backup key")
+                            
+                            # Nếu vẫn không có, thử extract từ rule YAML
+                            if (not value_name or value_name == "None") and "rule_ids" in backup:
+                                try:
+                                    rules = load_rules()
+                                    for rule_id in backup.get("rule_ids", []):
+                                        for r in rules:
+                                            if r.get("id") == rule_id:
+                                                check_cmd = r.get("check", {}).get("winrm", "")
+                                                reg_match = re.search(r'reg query\s+"([^"]+)"\s+/v\s+(\S+)', check_cmd)
+                                                if reg_match:
+                                                    rule_reg_path = reg_match.group(1)
+                                                    rule_value_name = reg_match.group(2)
+                                                    # Kiểm tra xem reg_path có match không
+                                                    if not reg_path or rule_reg_path.replace('\\', '_').replace(':', '_') in key_without_prefix:
+                                                        value_name = rule_value_name
+                                                        reg_path = rule_reg_path
+                                                        print(f"   ✓ Extracted value_name '{value_name}' from rule {rule_id}")
+                                                        break
+                                        if value_name and value_name != "None":
+                                            break
+                                except Exception as e:
+                                    print(f"   ⚠️ Failed to extract value_name from rules: {e}")
+                            
+                            # Nếu vẫn không có value_name hợp lệ, skip
+                            if not value_name or value_name == "None" or value_name.strip() == "":
+                                print(f"   ⚠️ Cannot determine value_name for key {key}, skipping")
+                                continue
                         
                         if not exists:
                             print(f"🔄 Registry key {reg_path}\\{value_name} did not exist originally, skipping restore")
