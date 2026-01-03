@@ -416,9 +416,27 @@ class RollbackManager:
                     if policies:
                         all_policies.update(policies)
                     
-                    print(f"   📋 Rule {rule_id}: type={backup_plan.get('type')}")
+                    # Backup các loại settings khác dựa vào type (không chỉ policies)
+                    backup_type = backup_plan.get("type")
+                    if backup_type == "net_accounts":
+                        # Đánh dấu cần backup net_accounts
+                        all_policies.add("password")
+                    elif backup_type == "net_user":
+                        # Đánh dấu cần backup net_user guest
+                        all_policies.add("guest")
+                    elif backup_type == "secedit":
+                        # Đánh dấu cần backup secedit
+                        all_policies.add("secedit")
+                    elif backup_type == "netsh":
+                        # Đánh dấu cần backup netsh
+                        all_policies.add("netsh")
+                    elif backup_type == "auditpol":
+                        # Đánh dấu cần backup auditpol
+                        all_policies.add("auditpol")
+                    
+                    print(f"   📋 Rule {rule_id}: type={backup_type}")
             
-            print(f"✅ Total unique settings to backup: {len(all_registry_keys)} registry keys, {len(all_policies)} policies")
+            print(f"✅ Total unique settings to backup: {len(all_registry_keys)} registry keys, {len(all_policies)} policies/settings")
             
             backup_data = {
                 "host": host,
@@ -485,22 +503,31 @@ class RollbackManager:
                     except Exception as e:
                         print(f"   ⚠️ Failed to backup registry {reg_path}\\{value_name}: {e}")
                 
-                # Backup policies
+                # Backup policies và các loại settings khác
                 for policy in all_policies:
                     try:
                         print(f"🔍 Backing up policy: {policy}...")
-                        if policy == "password":
+                        if policy == "password" or policy == "net_accounts":
                             self._backup_net_accounts(session, backup_data)
-                        elif policy == "guest":
+                        elif policy == "guest" or policy == "net_user":
                             self._backup_net_user_guest(session, backup_data)
+                        elif policy == "secedit":
+                            # Backup secedit sẽ được xử lý ở phần dưới
+                            pass
+                        elif policy == "netsh":
+                            # Backup netsh sẽ được xử lý ở phần dưới
+                            pass
+                        elif policy == "auditpol":
+                            # Backup auditpol sẽ được xử lý ở phần dưới
+                            pass
                         # Có thể thêm các policies khác
                     except Exception as e:
                         print(f"   ⚠️ Failed to backup policy {policy}: {e}")
                 
-                # Backup secedit, netsh, auditpol nếu có rules liên quan
-                has_secedit = any(plan.get("type") == "secedit" for plan in all_backup_plans)
-                has_netsh = any(plan.get("type") == "netsh" for plan in all_backup_plans)
-                has_auditpol = any(plan.get("type") == "auditpol" for plan in all_backup_plans)
+                # Backup secedit, netsh, auditpol nếu có rules liên quan hoặc trong all_policies
+                has_secedit = any(plan.get("type") == "secedit" for plan in all_backup_plans) or "secedit" in all_policies
+                has_netsh = any(plan.get("type") == "netsh" for plan in all_backup_plans) or "netsh" in all_policies
+                has_auditpol = any(plan.get("type") == "auditpol" for plan in all_backup_plans) or "auditpol" in all_policies
                 
                 if has_secedit:
                     try:
