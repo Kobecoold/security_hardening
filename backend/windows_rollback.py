@@ -376,7 +376,7 @@ class RollbackManager:
             }
             
             try:
-                # Backup registry keys
+                # Backup registry keys - lưu dạng dict để rollback dễ parse
                 for reg_path, value_name in all_registry_keys:
                     try:
                         print(f"🔍 Backing up registry: {reg_path}\\{value_name}...")
@@ -388,11 +388,36 @@ class RollbackManager:
                             lines = output.split('\n')
                             for line in lines:
                                 if value_name in line and ('REG_DWORD' in line or 'REG_SZ' in line or 'REG_MULTI_SZ' in line):
-                                    reg_path_normalized = reg_path.replace('\\', '_').replace(':', '')
-                                    backup_key = f"registry_{reg_path_normalized}_{value_name}"
-                                    backup_data["data"][backup_key] = line.strip()
-                                    print(f"   ✓ Registry backed up: {reg_path}\\{value_name}")
-                                    break
+                                    # Parse line: "    value_name    REG_DWORD    0x1"
+                                    parts = line.strip().split()
+                                    if len(parts) >= 3:
+                                        reg_type = parts[1]  # REG_DWORD, REG_SZ, etc.
+                                        reg_value = parts[2]  # 0x1, value string, etc.
+                                        
+                                        # Normalize path for backup key
+                                        reg_path_normalized = reg_path.replace('\\', '_').replace(':', '_')
+                                        backup_key = f"registry_{reg_path_normalized}_{value_name}"
+                                        
+                                        # Lưu dạng dict để rollback dễ parse
+                                        backup_data["data"][backup_key] = {
+                                            "path": reg_path,
+                                            "value_name": value_name,
+                                            "value_type": reg_type,
+                                            "value_data": reg_value,
+                                            "exists": True
+                                        }
+                                        print(f"   ✓ Registry backed up: {reg_path}\\{value_name} = {reg_value} ({reg_type})")
+                                        break
+                        else:
+                            # Registry key không tồn tại - vẫn backup để biết trạng thái
+                            reg_path_normalized = reg_path.replace('\\', '_').replace(':', '_')
+                            backup_key = f"registry_{reg_path_normalized}_{value_name}"
+                            backup_data["data"][backup_key] = {
+                                "path": reg_path,
+                                "value_name": value_name,
+                                "exists": False
+                            }
+                            print(f"   ⚠️ Registry key does not exist: {reg_path}\\{value_name}")
                     except Exception as e:
                         print(f"   ⚠️ Failed to backup registry {reg_path}\\{value_name}: {e}")
                 
@@ -811,72 +836,154 @@ class RollbackManager:
                 # Thử restore generic như fallback
                 self._restore_generic(session, backup["data"], rollback_details)
             
-            # 5. Khôi phục Registry Keys nếu có
+            # 5. Khôi phục Registry Keys nếu có - hỗ trợ cả dict và string format
             for key, reg_data in backup["data"].items():
-                if key.startswith("registry_") and isinstance(reg_data, dict):
-                    try:
+                if not key.startswith("registry_") or key == "backup_info":
+                    continue
+                
+                try:
+                    reg_path = None
+                    value_name = None
+                    value_type = None
+                    value_data = None
+                    
+                    # Parse từ backup_key: registry_HKLM_SYSTEM_CurrentControlSet_Services_LanmanServer_Parameters_value_name
+                    # Format: registry_{normalized_path}_{value_name}
+                    if isinstance(reg_data, dict):
+                        # Format dict (từ single rule backup hoặc batch backup mới)
                         reg_path = reg_data.get("path")
                         value_name = reg_data.get("value_name")
-                        value_type = reg_data.get("value_type", "REG_DWORD")
-                        value_data = reg_data.get("value_data")
+                        # Support cả "value_type" và "type" (backward compatibility)
+                        value_type = reg_data.get("value_type") or reg_data.get("type", "REG_DWORD")
+                        # Support cả "value_data" và "value" (backward compatibility)
+                        value_data = reg_data.get("value_data") or reg_data.get("value")
                         exists = reg_data.get("exists", True)
                         
                         if not exists:
-                            # Registry key didn't exist, delete it if it exists now
                             print(f"🔄 Registry key {reg_path}\\{value_name} did not exist originally, skipping restore")
-                            rollback_details[f"registry_{key}"] = {
+                            rollback_details[key] = {
                                 "status": "SKIPPED",
                                 "message": "Registry key did not exist originally"
                             }
                             continue
-                        
-                        if not reg_path or not value_name or not value_data:
+                    elif isinstance(reg_data, str):
+                        # Format string (từ batch backup cũ) - parse từ reg query output
+                        # Example: "    RequireSecuritySignature    REG_DWORD    0x1"
+                        # Extract từ backup_key: registry_HKLM_SYSTEM_CurrentControlSet_Services_LanmanServer_Parameters_RequireSecuritySignature
+                        parts = key.replace("registry_", "").split("_")
+                        if len(parts) < 2:
                             continue
                         
-                        print(f"🔄 Restoring registry key: {reg_path}\\{value_name} = {value_data}")
+                        # Last part is value_name, rest is path
+                        value_name = parts[-1]
+                        path_parts = parts[:-1]
                         
-                        # Restore registry value
-                        if value_type == "REG_DWORD":
-                            # Convert hex to decimal for reg add command
-                            if value_data.startswith("0x"):
-                                decimal_value = int(value_data, 16)
-                            else:
-                                decimal_value = int(value_data)
-                            cmd = f'reg add "{reg_path}" /v {value_name} /t {value_type} /d {decimal_value} /f'
+                        # Reconstruct registry path: HKLM\SYSTEM\CurrentControlSet\...
+                        if path_parts[0].startswith("HKLM") or path_parts[0].startswith("HKEY"):
+                            reg_path = "\\".join(path_parts)
                         else:
-                            # REG_SZ or other types
-                            cmd = f'reg add "{reg_path}" /v {value_name} /t {value_type} /d "{value_data}" /f'
+                            reg_path = "HKLM\\" + "\\".join(path_parts)
                         
-                        result = session.run_cmd(cmd)
-                        
-                        # Verify restoration
-                        verify_result = session.run_cmd(f'reg query "{reg_path}" /v {value_name}')
-                        verified = False
-                        if verify_result.status_code == 0:
-                            verify_output = verify_result.std_out.decode().strip()
-                            if value_data in verify_output or str(decimal_value) in verify_output:
-                                verified = True
-                        
-                        rollback_details[f"registry_{key}"] = {
-                            "status": "RESTORED" if verified else "PARTIAL",
-                            "command": cmd,
-                            "result": result.std_out.decode(),
-                            "exit_code": result.status_code,
-                            "verified": verified,
-                            "message": f"Registry key restored: {reg_path}\\{value_name} = {value_data}"
-                        }
-                        
-                        if verified:
-                            print(f"   ✓ Registry key restored: {reg_path}\\{value_name} = {value_data}")
+                        # Parse reg_data string to extract value_type and value_data
+                        # Format: "    value_name    REG_DWORD    0x1" or "    value_name    REG_SZ    value"
+                        reg_line = reg_data.strip()
+                        if value_name in reg_line:
+                            # Extract value type and data
+                            parts_line = reg_line.split()
+                            if len(parts_line) >= 3:
+                                # Find REG_* type
+                                for i, part in enumerate(parts_line):
+                                    if part.startswith("REG_"):
+                                        value_type = part
+                                        if i + 1 < len(parts_line):
+                                            value_data = parts_line[i + 1]
+                                        else:
+                                            value_data = ""
+                                        break
+                                else:
+                                    # Fallback: assume REG_DWORD if not found
+                                    value_type = "REG_DWORD"
+                                    value_data = parts_line[-1] if len(parts_line) > 1 else ""
                         else:
-                            print(f"   ⚠️ Registry key restore verification failed: {reg_path}\\{value_name}")
-                    except Exception as e:
-                        print(f"   ⚠️ Error restoring registry key {key}: {e}")
-                        rollback_details[f"registry_{key}"] = {
-                            "status": "ERROR",
-                            "error": str(e),
-                            "message": f"Error restoring registry key: {e}"
-                        }
+                            continue
+                    else:
+                        continue
+                    
+                    if not reg_path or not value_name or not value_data:
+                        print(f"   ⚠️ Skipping {key}: missing path, value_name, or value_data")
+                        continue
+                    
+                    print(f"🔄 Restoring registry key: {reg_path}\\{value_name} = {value_data} (type: {value_type})")
+                    
+                    # Restore registry value
+                    if value_type == "REG_DWORD":
+                        # Convert hex to decimal for reg add command
+                        if isinstance(value_data, str) and value_data.startswith("0x"):
+                            decimal_value = int(value_data, 16)
+                        else:
+                            decimal_value = int(value_data)
+                        cmd = f'reg add "{reg_path}" /v {value_name} /t {value_type} /d {decimal_value} /f'
+                    else:
+                        # REG_SZ or other types
+                        cmd = f'reg add "{reg_path}" /v {value_name} /t {value_type} /d "{value_data}" /f'
+                    
+                    result = session.run_cmd(cmd)
+                    
+                    # Verify restoration
+                    verify_result = session.run_cmd(f'reg query "{reg_path}" /v {value_name}')
+                    verified = False
+                    if verify_result.status_code == 0:
+                        verify_output = verify_result.std_out.decode().strip()
+                        value_data_str = str(value_data)
+                        if value_data_str in verify_output:
+                            verified = True
+                        elif value_type == "REG_DWORD" and str(decimal_value) in verify_output:
+                            verified = True
+                        elif value_type == "REG_DWORD" and f"0x{decimal_value:x}" in verify_output:
+                            verified = True
+                    
+                    rollback_details[key] = {
+                        "status": "RESTORED" if verified else "PARTIAL",
+                        "command": cmd,
+                        "result": result.std_out.decode() if result.status_code == 0 else result.std_err.decode(),
+                        "exit_code": result.status_code,
+                        "verified": verified,
+                        "message": f"Registry key restored: {reg_path}\\{value_name} = {value_data}"
+                    }
+                    
+                    if verified:
+                        print(f"   ✓ Registry key restored: {reg_path}\\{value_name} = {value_data}")
+                    else:
+                        print(f"   ⚠️ Registry key restore verification failed: {reg_path}\\{value_name}")
+                        print(f"      Expected: {value_data}, Got: {verify_output[:200] if verify_result.status_code == 0 else 'N/A'}")
+                except Exception as e:
+                    print(f"   ⚠️ Error restoring registry key {key}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    rollback_details[key] = {
+                        "status": "ERROR",
+                        "error": str(e),
+                        "message": f"Error restoring registry key: {e}"
+                    }
+            
+            # Reload security policies nếu có registry keys được restore
+            registry_keys_restored = sum(1 for k, v in rollback_details.items() 
+                                       if k.startswith("registry_") and isinstance(v, dict) and v.get("status") == "RESTORED")
+            if registry_keys_restored > 0:
+                try:
+                    print("🔄 Reloading security policies after registry changes...")
+                    # Force policy update
+                    gpupdate_result = session.run_cmd('gpupdate /force /wait:0')
+                    if gpupdate_result.status_code == 0:
+                        print("   ✓ Group policy updated")
+                    else:
+                        print(f"   ⚠️ Group policy update returned exit code {gpupdate_result.status_code}")
+                    
+                    # Reload registry (some settings require reboot, but we try to apply immediately)
+                    reload_result = session.run_cmd('reg add "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager" /v PendingFileRenameOperations /t REG_MULTI_SZ /d "" /f 2>nul')
+                    print("   ✓ Registry changes applied")
+                except Exception as e:
+                    print(f"   ⚠️ Failed to reload policies (non-critical): {e}")
             
             # Lưu rollback log
             rollback_log = {

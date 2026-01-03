@@ -2111,7 +2111,6 @@ async def reset_all_api_keys(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 @app.get("/version")
 async def version():
     """Version endpoint."""
@@ -2157,3 +2156,4 @@ if DASHBOARD_BUILT:
         if os.path.exists(index_path):
             return FileResponse(index_path)
         raise HTTPException(status_code=404, detail="Dashboard not found")
+
