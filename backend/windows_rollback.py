@@ -727,20 +727,21 @@ class RollbackManager:
                          rule_id: Optional[str] = None) -> Dict:
         """Rollback chỉ những settings đã backup cho rule cụ thể (giống Linux)."""
         try:
-            # Tìm backup
+            # Tìm backup - hỗ trợ cả single rule và batch backups
             if backup_id:
                 backup = self.db.backups.find_one({"backup_id": backup_id, "host": host})
             elif rule_id:
-                # Tìm backup gần nhất cho rule này
-                backup = self.db.backups.find_one(
-                    {
-                        "host": host, 
-                        "rule_id": rule_id, 
-                        "type": "pre_remediation_backup",
-                        "os_type": "windows"
-                    },
-                    sort=[("timestamp", -1)]
-                )
+                # Tìm backup gần nhất cho rule này - hỗ trợ cả single và batch backups
+                query = {
+                    "host": host,
+                    "type": "pre_remediation_backup",
+                    "os_type": "windows",
+                    "$or": [
+                        {"rule_id": rule_id},  # Single rule backup
+                        {"rule_ids": rule_id}  # Batch backup chứa rule này
+                    ]
+                }
+                backup = self.db.backups.find_one(query, sort=[("timestamp", -1)])
             else:
                 # Tìm backup gần nhất (bất kỳ rule nào)
                 backup = self.db.backups.find_one(
@@ -753,20 +754,36 @@ class RollbackManager:
                 )
             
             if not backup:
+                error_msg = f"No backup found for Windows host {host}"
+                if rule_id:
+                    error_msg += f" with rule {rule_id}"
                 return {
                     "status": "SKIPPED",
-                    "message": f"No rule-specific backup found for Windows host {host}",
+                    "message": error_msg,
                     "host": host,
-                    "rule_id": rule_id
+                    "rule_id": rule_id,
+                    "error": "BACKUP_NOT_FOUND"
                 }
             
-            print(f"🔄 Starting rule-specific rollback for {host}, rule: {backup.get('rule_id')}")
-            print(f"   Backup ID: {backup.get('backup_id')}")
-            print(f"   Backup type: {backup.get('backup_type')}")
+            # Xác định loại backup (single rule hoặc batch)
+            backup_rule_id = backup.get("rule_id")
+            backup_rule_ids = backup.get("rule_ids")
+            is_batch_backup = backup_rule_ids is not None and len(backup_rule_ids) > 0
+            
+            if is_batch_backup:
+                print(f"🔄 Starting batch rollback for {host}, rules: {', '.join(backup_rule_ids[:3])}{'...' if len(backup_rule_ids) > 3 else ''}")
+                print(f"   Backup ID: {backup.get('backup_id')}")
+                print(f"   Backup type: {backup.get('backup_type', 'batch')}")
+                print(f"   Total rules in backup: {len(backup_rule_ids)}")
+                if rule_id and rule_id not in backup_rule_ids:
+                    print(f"   ⚠️ Warning: Requested rule {rule_id} not in backup rules list")
+            else:
+                print(f"🔄 Starting rule-specific rollback for {host}, rule: {backup_rule_id}")
+                print(f"   Backup ID: {backup.get('backup_id')}")
+                print(f"   Backup type: {backup.get('backup_type')}")
             
             rollback_details = {}
             backup_type = backup.get("backup_type", "unknown")
-            backup_rule_id = backup.get("rule_id", rule_id)
             
             # Rollback theo từng loại backup
             try:
@@ -878,22 +895,28 @@ class RollbackManager:
             
             # Kiểm tra xem rollback có thành công không
             success_count = sum(1 for detail in rollback_details.values() 
-                              if isinstance(detail, dict) and detail.get("status") == "SUCCESS")
+                              if isinstance(detail, dict) and detail.get("status") in ["RESTORED", "SUCCESS", "SKIPPED"])
             total_count = len([d for d in rollback_details.values() if isinstance(d, dict)])
             
-            if total_count > 0 and success_count == total_count:
+            if total_count == 0:
+                final_status = "SKIPPED"
+                message = f"No settings to restore for Windows host {host}"
+            elif total_count > 0 and success_count == total_count:
                 final_status = "SUCCESS"
+                message = f"Rule-specific rollback completed successfully for Windows host {host}"
             elif success_count > 0:
                 final_status = "PARTIAL"
+                message = f"Rule-specific rollback partially completed for Windows host {host} ({success_count}/{total_count} operations succeeded)"
             else:
                 final_status = "FAILED"
+                message = f"Rule-specific rollback failed for Windows host {host} (0/{total_count} operations succeeded)"
             
             return {
                 "status": final_status,
-                "message": f"Rule-specific rollback completed for Windows host {host}",
+                "message": message,
                 "host": host,
                 "backup_id": backup.get("backup_id", "unknown"),
-                "rule_id": backup_rule_id,
+                "rule_id": backup_rule_id or backup_rule_ids,
                 "backup_type": backup_type,
                 "rollback_details": rollback_details,
                 "summary": {
@@ -904,14 +927,18 @@ class RollbackManager:
             }
             
         except Exception as e:
+            error_msg = f"Rollback failed: {str(e)}"
             print(f"❌ Rule-specific rollback failed: {e}")
             import traceback
             traceback.print_exc()
             return {
                 "status": "FAILED",
-                "message": f"Rollback failed: {str(e)}",
+                "message": error_msg,
                 "host": host,
-                "rule_id": rule_id
+                "rule_id": rule_id,
+                "error": "ROLLBACK_EXECUTION_ERROR",
+                "error_details": str(e),
+                "rollback_details": {}
             }
     
     def _restore_registry_keys(self, session: winrm.Session, backup_data: Dict, 

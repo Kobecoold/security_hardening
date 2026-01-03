@@ -529,27 +529,61 @@ class LinuxRollbackManager:
         key_path: str = "",
         password: Optional[str] = None,
         sudo_password: Optional[str] = None,
-        backup_id: Optional[str] = None
+        backup_id: Optional[str] = None,
+        rule_id: Optional[str] = None
     ) -> Dict:
-        """Thực hiện rollback dựa trên backup."""
+        """Thực hiện rollback dựa trên backup - hỗ trợ cả single rule và batch backups."""
         try:
-            # Tìm backup
+            # Tìm backup - hỗ trợ cả single rule và batch backups
             if backup_id:
                 backup = self.db.backups.find_one({"backup_id": backup_id, "host": host})
+            elif rule_id:
+                # Tìm backup gần nhất cho rule này - hỗ trợ cả single và batch backups
+                query = {
+                    "host": host,
+                    "type": "pre_remediation_backup",
+                    "os_type": "linux",
+                    "$or": [
+                        {"rule_id": rule_id},  # Single rule backup
+                        {"rule_ids": rule_id}  # Batch backup chứa rule này
+                    ]
+                }
+                backup = self.db.backups.find_one(query, sort=[("timestamp", -1)])
             else:
+                # Tìm backup gần nhất (bất kỳ rule nào)
                 backup = self.db.backups.find_one(
                     {"host": host, "type": "pre_remediation_backup", "os_type": "linux"},
                     sort=[("timestamp", -1)]
                 )
             
             if not backup:
+                error_msg = f"No backup found for Linux host {host}"
+                if rule_id:
+                    error_msg += f" with rule {rule_id}"
                 return {
                     "status": "SKIPPED",
-                    "message": f"No backup found for Linux host {host}",
-                    "host": host
+                    "message": error_msg,
+                    "host": host,
+                    "rule_id": rule_id,
+                    "error": "BACKUP_NOT_FOUND"
                 }
             
-            print(f"🔄 Starting rollback for Linux host {host} using backup: {backup.get('backup_id', 'unknown')}")
+            # Xác định loại backup (single rule hoặc batch)
+            backup_rule_id = backup.get("rule_id")
+            backup_rule_ids = backup.get("rule_ids")
+            is_batch_backup = backup_rule_ids is not None and len(backup_rule_ids) > 0
+            
+            if is_batch_backup:
+                print(f"🔄 Starting batch rollback for Linux host {host}")
+                print(f"   Backup ID: {backup.get('backup_id', 'unknown')}")
+                print(f"   Rules in backup: {', '.join(backup_rule_ids[:3])}{'...' if len(backup_rule_ids) > 3 else ''}")
+                print(f"   Total rules: {len(backup_rule_ids)}")
+                if rule_id and rule_id not in backup_rule_ids:
+                    print(f"   ⚠️ Warning: Requested rule {rule_id} not in backup rules list")
+            else:
+                print(f"🔄 Starting rollback for Linux host {host}")
+                print(f"   Backup ID: {backup.get('backup_id', 'unknown')}")
+                print(f"   Rule: {backup_rule_id or 'N/A'}")
             
             ssh = ssh_connect(host, username, key_path, password)
             rollback_details = {}
@@ -1004,21 +1038,51 @@ rm /tmp/restore_{file_path.replace("/", "_")}
             self.db.backups.insert_one(rollback_log)
             self._update_remediation_status(host, "ROLLED_BACK")
             
+            # Tính toán status dựa trên rollback_details
+            success_count = sum(1 for detail in rollback_details.values() 
+                              if isinstance(detail, dict) and detail.get("status") in ["RESTORED", "SKIPPED"])
+            total_count = len([d for d in rollback_details.values() if isinstance(d, dict)])
+            
+            if total_count == 0:
+                final_status = "SKIPPED"
+                message = f"No files to restore for Linux host {host}"
+            elif total_count > 0 and success_count == total_count:
+                final_status = "SUCCESS"
+                message = f"Rollback completed successfully for Linux host {host}"
+            elif success_count > 0:
+                final_status = "PARTIAL"
+                message = f"Rollback partially completed for Linux host {host} ({success_count}/{total_count} operations succeeded)"
+            else:
+                final_status = "FAILED"
+                message = f"Rollback failed for Linux host {host} (0/{total_count} operations succeeded)"
+            
             return {
-                "status": "SUCCESS",
-                "message": f"Rollback completed for Linux host {host}",
+                "status": final_status,
+                "message": message,
+                "host": host,
                 "backup_id": backup.get("backup_id", "unknown"),
-                "rollback_details": rollback_details
+                "rule_id": backup.get("rule_id") or backup.get("rule_ids"),
+                "rollback_details": rollback_details,
+                "summary": {
+                    "total_operations": total_count,
+                    "successful_operations": success_count,
+                    "failed_operations": total_count - success_count
+                }
             }
             
         except Exception as e:
+            error_msg = f"Rollback failed: {str(e)}"
             print(f"❌ Rollback failed: {e}")
             import traceback
             traceback.print_exc()
             return {
                 "status": "FAILED",
-                "message": f"Rollback failed: {str(e)}",
-                "host": host
+                "message": error_msg,
+                "host": host,
+                "rule_id": rule_id,
+                "error": "ROLLBACK_EXECUTION_ERROR",
+                "error_details": str(e),
+                "rollback_details": {}
             }
     
     def _update_remediation_status(self, host: str, status: str):

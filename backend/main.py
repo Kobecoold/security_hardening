@@ -1029,15 +1029,17 @@ async def rollback_windows(
             "rule_id": result.get("rule_id"),
             "backup_type": result.get("backup_type"),
             "rollback_details": result.get("rollback_details", {}),
-            "summary": result.get("summary", {})
+            "summary": result.get("summary", {}),
+            "error": result.get("error")  # Include error code if any
         }
         
     except HTTPException:
         raise
     except Exception as e:
         print(f"❌ Rollback failed: {e}")
+        import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Rollback failed: {str(e)}")
 
 @app.get("/backups/windows/rule/{rule_id}", dependencies=[RequireAuth])
 async def get_windows_backups_by_rule(
@@ -1045,12 +1047,16 @@ async def get_windows_backups_by_rule(
     host: Optional[str] = None,
     limit: int = 20
 ):
-    """Lấy danh sách backups cho một rule cụ thể."""
+    """Lấy danh sách backups cho một rule cụ thể - hỗ trợ cả single và batch backups."""
     try:
+        # Query hỗ trợ cả single rule backup và batch backup chứa rule này
         query = {
             "os_type": "windows",
             "type": "pre_remediation_backup",
-            "rule_id": rule_id
+            "$or": [
+                {"rule_id": rule_id},  # Single rule backup
+                {"rule_ids": rule_id}  # Batch backup chứa rule này
+            ]
         }
         if host:
             query["host"] = host
@@ -1066,7 +1072,46 @@ async def get_windows_backups_by_rule(
             "backups": backups
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"❌ Error getting Windows backups by rule {rule_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to get backups: {str(e)}")
+
+@app.get("/backups/linux/rule/{rule_id}", dependencies=[RequireAuth])
+async def get_linux_backups_by_rule(
+    rule_id: str,
+    host: Optional[str] = None,
+    limit: int = 20
+):
+    """Lấy danh sách backups cho một rule cụ thể - hỗ trợ cả single và batch backups."""
+    try:
+        # Query hỗ trợ cả single rule backup và batch backup chứa rule này
+        query = {
+            "os_type": "linux",
+            "type": "pre_remediation_backup",
+            "$or": [
+                {"rule_id": rule_id},  # Single rule backup
+                {"rule_ids": rule_id}  # Batch backup chứa rule này
+            ]
+        }
+        if host:
+            query["host"] = host
+        
+        backups = list(db.backups.find(query).sort("timestamp", -1).limit(limit))
+        for backup in backups:
+            backup["_id"] = str(backup["_id"])
+        
+        return {
+            "total": len(backups),
+            "rule_id": rule_id,
+            "host": host,
+            "backups": backups
+        }
+    except Exception as e:
+        print(f"❌ Error getting Linux backups by rule {rule_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to get backups: {str(e)}")
 
 @app.get("/backups/windows", dependencies=[RequireAuth])
 async def get_windows_backups(host: Optional[str] = None):
@@ -1078,7 +1123,7 @@ async def get_windows_backups(host: Optional[str] = None):
             # Chỉ lấy rule backups, không lấy system backups
             backups = list(db.backups.find(
                 {
-                    "os_type": {"$ne": "linux"},
+                    "os_type": "windows",
                     "type": "pre_remediation_backup"
                 },
                 sort=[("timestamp", -1)]
@@ -1088,7 +1133,10 @@ async def get_windows_backups(host: Optional[str] = None):
         
         return {"total": len(backups), "backups": backups}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"❌ Error getting Windows backups: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to get backups: {str(e)}")
 
 @app.post("/rollback/linux", dependencies=[RequireAdmin])
 async def rollback_linux(
@@ -1098,13 +1146,18 @@ async def rollback_linux(
     Password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
     Sudo_password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
     backup_id: Optional[str] = Form(None),
+    rule_id: Optional[str] = Form(None),  # Thêm tham số rule_id
 ):
-    """Rollback Linux system về trạng thái trước khi remediation."""
+    """Rollback Linux system về trạng thái trước khi remediation (có thể theo rule_id)."""
     try:
         print(f"🔄 Starting rollback for Linux host: {Host}")
+        if rule_id:
+            print(f"   Rule ID specified: {rule_id}")
+        if backup_id:
+            print(f"   Backup ID specified: {backup_id}")
         
         result = linux_rollback_manager.execute_rollback(
-            Host, Username, Key_path or "", Password, Sudo_password, backup_id
+            Host, Username, Key_path or "", Password, Sudo_password, backup_id, rule_id
         )
         
         return {
@@ -1112,11 +1165,18 @@ async def rollback_linux(
             "message": result.get("message", "Rollback completed successfully"),
             "host": Host,
             "backup_id": result.get("backup_id"),
-            "rollback_details": result.get("rollback_details", {})
+            "rule_id": result.get("rule_id"),
+            "rollback_details": result.get("rollback_details", {}),
+            "error": result.get("error")  # Include error code if any
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ Rollback failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Rollback failed: {str(e)}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
