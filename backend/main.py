@@ -736,19 +736,12 @@ async def remediate_windows(
         os_type = host_info.get("os_type", "windows-10")
         print(f"✅ Host info: {os_type}")
         
-        backup_id = rollback_manager.create_backup(host, session, rule_id=Rule_id)
-        
-        # Tạo backup nếu được yêu cầu - SỬA: Gọi hàm create_backup với đúng tham số
+        # Tạo backup nếu được yêu cầu
+        backup_id = None
         if create_backup:
             try:
                 print("🔍 Creating rule-specific backup...")
-                backup_id = rollback_manager.create_backup(
-                    host=host,
-                    username=username,  # THÊM: username
-                    password=password,   # THÊM: password  
-                    rule_id=Rule_id,     # THÊM: rule_id
-                    session=session      # THÊM: session
-                )
+                backup_id = rollback_manager.create_backup(host, session, rule_id=Rule_id)
                 if backup_id:
                     print(f"✅ Backup created: {backup_id}")
                 else:
@@ -803,13 +796,33 @@ async def remediate_windows(
                 verification_output = verify_result.std_out.decode('utf-8', errors='ignore').strip()
                 verification_error = verify_result.std_err.decode('utf-8', errors='ignore').strip()
                 
-                if verify_result.status_code == 0 and expected_output in verification_output:
-                    verification_passed = True
+                # Normalize for comparison (case-insensitive, whitespace normalized)
+                output_normalized = verification_output.lower().strip()
+                expected_normalized = expected_output.lower().strip() if expected_output else ""
+                
+                # Check verification - same logic as audit
+                if expected_normalized:
+                    # Direct match
+                    if expected_normalized in output_normalized:
+                        verification_passed = (verify_result.status_code == 0)
+                    else:
+                        # Try to find pattern like "key = value" or "key=value" or "key value"
+                        import re
+                        pattern = re.compile(r'[=:\s]+' + re.escape(expected_normalized) + r'(?:\s|$|,|;|\)|])', re.IGNORECASE)
+                        verification_passed = (verify_result.status_code == 0 and pattern.search(output_normalized) is not None)
+                else:
+                    # If no expected value, just check exit code
+                    verification_passed = (verify_result.status_code == 0)
+                
+                if verification_passed:
                     print(f"✅ Verification PASSED - Rule '{Rule_id}' is FIXED")
+                    print(f"   Output: {verification_output[:200]}")
                 else:
                     print(f"⚠️ Verification FAILED - Rule '{Rule_id}' may still exist")
                     print(f"   Exit code: {verify_result.status_code}")
+                    print(f"   Expected: {expected_output}")
                     print(f"   Output: {verification_output[:200]}")
+                    print(f"   Error: {verification_error[:200] if verification_error else 'None'}")
             else:
                 print("⚠️ No check command found in rule for verification")
         except Exception as verify_error:
@@ -1148,6 +1161,48 @@ async def create_system_backup_windows(
         raise
     except Exception as e:
         print(f"❌ System backup failed: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/backups/system/restore", dependencies=[RequireAdmin])
+async def restore_system_backup(
+    backup_id: str = Form(...),
+    Host: str = Form(...),
+    Username: str = Form(""),
+    Key_path: Optional[str] = Form("~/.ssh/id_ed25519"),
+    Password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+    Sudo_password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+    username: Optional[str] = Form(None),  # Windows username
+    password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),  # Windows password
+):
+    """Restore system backup to a host."""
+    try:
+        # Determine if this is Windows or Linux based on backup
+        backup = db.backups.find_one({"backup_id": backup_id, "type": "system_backup"})
+        if not backup:
+            raise HTTPException(status_code=404, detail=f"Backup {backup_id} not found")
+        
+        os_type = backup.get("os_type", "linux")
+        
+        if os_type == "windows":
+            if not username or not password:
+                raise HTTPException(status_code=400, detail="Windows username and password are required")
+            # For Windows, pass password as sudo_password parameter (hack to reuse method signature)
+            result = system_backup_manager.restore_system_backup(
+                backup_id, Host, username, "", None, password
+            )
+        else:
+            result = system_backup_manager.restore_system_backup(
+                backup_id, Host, Username, Key_path or "", Password, Sudo_password
+            )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ System backup restore failed: {e}")
+        import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 

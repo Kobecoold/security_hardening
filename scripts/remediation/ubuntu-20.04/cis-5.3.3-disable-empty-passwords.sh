@@ -8,9 +8,9 @@ check_current_status() {
     # Check running config first
     if command -v sshd >/dev/null 2>&1; then
         if sshd -T 2>/dev/null | grep -iE '^permitemptypasswords' | grep -qiE '(no|false)'; then
-            echo "✅ SSH PermitEmptyPasswords is already disabled - FIXED"
-            exit 0
-        fi
+    echo "✅ SSH PermitEmptyPasswords is already disabled - FIXED"
+    exit 0
+fi
     fi
     # Check config file
     if [ -r /etc/ssh/sshd_config ]; then
@@ -87,8 +87,8 @@ verify_fix() {
     # Check 1: Verify config file has the setting
     if ! grep -qiE '^[[:space:]]*PermitEmptyPasswords[[:space:]]+no' /etc/ssh/sshd_config; then
         echo "❌ VERIFICATION FAILED: Config file does not contain 'PermitEmptyPasswords no'"
-        exit 1
-    fi
+    exit 1
+fi
     
     # Check 2: Verify sshd -T shows the correct setting
     if command -v sshd >/dev/null 2>&1; then

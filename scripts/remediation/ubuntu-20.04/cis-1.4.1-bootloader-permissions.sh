@@ -18,10 +18,10 @@ check_current_status() {
     
     # Check if already fixed (600 or 400 are both acceptable)
     if echo "$perms" | grep -qE "^(600|400) 0 0$"; then
-        echo "✅ Bootloader permissions are already configured - FIXED"
+    echo "✅ Bootloader permissions are already configured - FIXED"
         echo "   Current permissions: $perms"
-        exit 0
-    fi
+    exit 0
+fi
     
     echo "   Current permissions: $perms (needs to be 600 0 0 or 400 0 0)"
 }
@@ -72,8 +72,8 @@ verify_fix() {
     perms=$(stat -L -c "%a %u %g" /boot/grub/grub.cfg 2>/dev/null)
     if [ -z "$perms" ]; then
         echo "❌ VERIFICATION FAILED: Cannot read permissions"
-        exit 1
-    fi
+    exit 1
+fi
     
     echo "   Current permissions: $perms"
     

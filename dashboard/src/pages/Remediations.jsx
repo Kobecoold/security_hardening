@@ -283,34 +283,22 @@ export default function Remediations() {
                     )}
                   </div>
                 )}
-                {remediation.rollback_status && remediation.rollback_status === 'AVAILABLE' && remediation.backup_id && (
-                  <div className="detail-item">
-                    <strong>Rule Backup:</strong>{' '}
-                    <span className="rollback-available">Available</span>
-                    {userRole && String(userRole).trim().toLowerCase() === 'admin' && (
-                      <button
-                        onClick={() => {
-                          if (remediation.status === 'SUCCESS' && remediation.verification_passed === true) {
-                            if (window.confirm(
-                              `⚠️ Rollback Warning\n\n` +
-                              `This remediation was successful. Rolling back will restore the system to its state before this remediation was applied.\n\n` +
-                              `Before remediation: System was in its previous state\n` +
-                              `After remediation: Rule ${remediation.rule_id || 'N/A'} is now PASS\n` +
-                              `Rollback will restore: System back to the state before remediation\n\n` +
-                              `Do you want to continue?`
-                            )) {
-                              navigate('/rollback', {
-                                state: {
-                                  host: remediation.host,
-                                  osType: remediation.os_type || remediation.os || remediation.client_type === 'linux' ? 'linux' : 'windows',
-                                  selectedBackup: remediation.backup_id,
-                                  remediationId: remediation.remediation_id || remediation._id,
-                                  ruleId: remediation.rule_id,
-                                  backupType: 'rules'
-                                }
-                              })
-                            }
-                          } else {
+              {remediation.rollback_status && remediation.rollback_status === 'AVAILABLE' && remediation.backup_id && (
+                <div className="detail-item">
+                  <strong>Rule Backup:</strong>{' '}
+                  <span className="rollback-available">Available</span>
+                  {userRole && String(userRole).trim().toLowerCase() === 'admin' && (
+                    <button
+                      onClick={() => {
+                        if (remediation.status === 'SUCCESS' && remediation.verification_passed === true) {
+                          if (window.confirm(
+                            `⚠️ Rollback Warning\n\n` +
+                            `This remediation was successful. Rolling back will restore the system to its state before this remediation was applied.\n\n` +
+                            `Before remediation: System was in its previous state\n` +
+                            `After remediation: Rule ${remediation.rule_id || 'N/A'} is now PASS\n` +
+                            `Rollback will restore: System back to the state before remediation\n\n` +
+                            `Do you want to continue?`
+                          )) {
                             navigate('/rollback', {
                               state: {
                                 host: remediation.host,
@@ -322,16 +310,28 @@ export default function Remediations() {
                               }
                             })
                           }
-                        }}
-                        className="btn-rollback-small"
-                        title="Rollback rule"
-                      >
-                        <RotateCcw size={14} />
-                        Rollback Rule
-                      </button>
-                    )}
-                  </div>
-                )}
+                        } else {
+                          navigate('/rollback', {
+                            state: {
+                              host: remediation.host,
+                              osType: remediation.os_type || remediation.os || remediation.client_type === 'linux' ? 'linux' : 'windows',
+                              selectedBackup: remediation.backup_id,
+                              remediationId: remediation.remediation_id || remediation._id,
+                              ruleId: remediation.rule_id,
+                              backupType: 'rules'
+                            }
+                          })
+                        }
+                      }}
+                      className="btn-rollback-small"
+                      title="Rollback rule"
+                    >
+                      <RotateCcw size={14} />
+                      Rollback Rule
+                    </button>
+                  )}
+                </div>
+              )}
               </div>
 
               {/* Windows: Collapsible details button - only show if there are details */}
@@ -362,13 +362,13 @@ export default function Remediations() {
                   {/* Windows: Show verification in details section */}
                   {isWindows && remediation.verification_passed !== undefined && (
                     <div className="remediation-details">
-                      <div className="detail-item">
-                        <strong>Verification:</strong>{' '}
-                        {remediation.verification_passed ? (
-                          <span className="verification-passed">✓ Passed</span>
-                        ) : (
-                          <span className="verification-failed">✗ Failed</span>
-                        )}
+                    <div className="detail-item">
+                      <strong>Verification:</strong>{' '}
+                      {remediation.verification_passed ? (
+                        <span className="verification-passed">✓ Passed</span>
+                      ) : (
+                        <span className="verification-failed">✗ Failed</span>
+                      )}
                       </div>
                     </div>
                   )}

@@ -389,7 +389,9 @@ class RollbackManager:
                             reg_type = parts[1]
                             reg_value = parts[2]
                             
-                            reg_key = f"registry_{registry_path.replace('\\', '_').replace(':', '_')}_{value_name}"
+                            # Create backup key - cannot use backslash in f-string expression
+                            registry_path_normalized = registry_path.replace('\\', '_').replace(':', '_')
+                            reg_key = f"registry_{registry_path_normalized}_{value_name}"
                             backup_data["data"][reg_key] = {
                                 "path": registry_path,
                                 "value_name": value_name,
@@ -401,7 +403,9 @@ class RollbackManager:
                             break
             else:
                 # Key không tồn tại
-                reg_key = f"registry_{registry_path.replace('\\', '_').replace(':', '_')}_{value_name}"
+                # Create backup key - cannot use backslash in f-string expression
+                registry_path_normalized = registry_path.replace('\\', '_').replace(':', '_')
+                reg_key = f"registry_{registry_path_normalized}_{value_name}"
                 backup_data["data"][reg_key] = {
                     "path": registry_path,
                     "value_name": value_name,

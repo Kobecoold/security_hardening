@@ -20,7 +20,7 @@ export default function AuditForm({ osType = 'linux' }) {
     use_sudo: false,
     sudo_password: ''
   })
-  
+
   const [showSudoWarning, setShowSudoWarning] = useState(false)
   
   // Validate form before submit

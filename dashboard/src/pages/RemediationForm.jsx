@@ -376,20 +376,20 @@ export default function RemediationForm() {
           
           console.log(`Processing Windows rule ${i + 1}/${validRuleIds.length}: ${ruleId}`)
           
-          const formDataToSend = new FormData()
-          formDataToSend.append('host', formData.host)
-          formDataToSend.append('username', formData.username || 'Administrator')
-          formDataToSend.append('password', formData.password)
+        const formDataToSend = new FormData()
+        formDataToSend.append('host', formData.host)
+        formDataToSend.append('username', formData.username || 'Administrator')
+        formDataToSend.append('password', formData.password)
           formDataToSend.append('rule_id', ruleId.trim())
           // Only create backup for first rule
           formDataToSend.append('create_backup', formData.create_backup && i === 0)
 
           try {
-            const response = await api.post('/remediate/windows', formDataToSend, {
-              headers: {
-                'Content-Type': 'multipart/form-data'
-              }
-            })
+        const response = await api.post('/remediate/windows', formDataToSend, {
+          headers: {
+            'Content-Type': 'multipart/form-data'
+          }
+        })
             results.push(response.data)
           } catch (err) {
             console.error(`Error remediating Windows rule ${ruleId}:`, err)
@@ -744,34 +744,34 @@ export default function RemediationForm() {
                 )}
               </div>
 
-              <div className="form-section">
-                <h2>Windows Connection</h2>
-                
-                <div className="form-group">
-                  <label htmlFor="username">Username</label>
-                  <input
-                    id="username"
-                    name="username"
-                    type="text"
-                    value={formData.username}
-                    onChange={handleChange}
-                    placeholder="Administrator"
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label htmlFor="password">Password *</label>
-                  <input
-                    id="password"
-                    name="password"
-                    type="password"
-                    value={formData.password}
-                    onChange={handleChange}
-                    placeholder="Windows password"
-                    required
-                  />
-                </div>
+            <div className="form-section">
+              <h2>Windows Connection</h2>
+              
+              <div className="form-group">
+                <label htmlFor="username">Username</label>
+                <input
+                  id="username"
+                  name="username"
+                  type="text"
+                  value={formData.username}
+                  onChange={handleChange}
+                  placeholder="Administrator"
+                />
               </div>
+
+              <div className="form-group">
+                <label htmlFor="password">Password *</label>
+                <input
+                  id="password"
+                  name="password"
+                  type="password"
+                  value={formData.password}
+                  onChange={handleChange}
+                  placeholder="Windows password"
+                  required
+                />
+              </div>
+            </div>
             </>
           )}
 

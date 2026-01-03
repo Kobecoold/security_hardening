@@ -72,9 +72,9 @@ def ssh_connect(host: str, username: str, key_path: str, password: Optional[str]
         )
     
     try:
-        ssh.connect(**connect_kwargs)
+    ssh.connect(**connect_kwargs)
         print(f"✅ SSH connection established to {host} as {username}")
-        return ssh
+    return ssh
     except paramiko.ssh_exception.AuthenticationException as e:
         error_msg = f"SSH Authentication failed for user '{username}' on host '{host}'. "
         if password:

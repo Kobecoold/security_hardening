@@ -14,10 +14,10 @@ check_sudo() {
 
 # Check if already fixed
 check_current_status() {
-    if sshd -T 2>/dev/null | grep -i '^permitrootlogin' | grep -qi 'no'; then
-        echo "✅ SSH Root Login is already disabled - FIXED"
-        exit 0
-    fi
+if sshd -T 2>/dev/null | grep -i '^permitrootlogin' | grep -qi 'no'; then
+    echo "✅ SSH Root Login is already disabled - FIXED"
+    exit 0
+fi
 }
 
 # Backup config before making changes
@@ -87,8 +87,8 @@ verify_fix() {
     # Check 1: Verify config file has the setting
     if ! grep -qiE '^[[:space:]]*PermitRootLogin[[:space:]]+no' /etc/ssh/sshd_config; then
         echo "❌ VERIFICATION FAILED: Config file does not contain 'PermitRootLogin no'"
-        exit 1
-    fi
+    exit 1
+fi
     
     # Check 2: Verify sshd -T shows the correct setting
     if sshd -T 2>/dev/null | grep -i '^permitrootlogin' | grep -qi 'no'; then

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import { useAuth } from '../contexts/AuthContext'
-import { Database, RefreshCw, Plus, Calendar, Server, Clock, Trash2, Play, Pause, Eye } from 'lucide-react'
+import { Database, RefreshCw, Plus, Calendar, Server, Clock, Trash2, Play, Pause, Eye, RotateCcw } from 'lucide-react'
 import './SystemBackups.css'
 
 export default function SystemBackups() {
@@ -34,6 +34,14 @@ export default function SystemBackups() {
       logging_config: true,
       system_info: true
     }
+  })
+
+  const [restoreFormData, setRestoreFormData] = useState({
+    host: '',
+    username: '',
+    password: '',
+    sudo_password: '',
+    key_path: ''
   })
 
   const [scheduleData, setScheduleData] = useState({
@@ -269,6 +277,75 @@ export default function SystemBackups() {
     }
   }
 
+  const handleRestoreBackup = (backup) => {
+    setRestoringBackup(backup)
+    setRestoreFormData({
+      host: backup.host || '',
+      username: '',
+      password: '',
+      sudo_password: '',
+      key_path: ''
+    })
+    setShowRestoreForm(true)
+  }
+
+  const handleRestoreSubmit = async (e) => {
+    e.preventDefault()
+    if (!restoringBackup) return
+
+    if (!window.confirm(
+      `⚠️ Warning: This will restore system backup ${restoringBackup.backup_id} to ${restoreFormData.host || 'the target host'}.\n\n` +
+      `This action will overwrite current system configurations. Are you sure you want to continue?`
+    )) {
+      return
+    }
+
+    setRestoring(true)
+    setError(null)
+
+    try {
+      const formDataToSend = new FormData()
+      formDataToSend.append('backup_id', restoringBackup.backup_id || restoringBackup._id)
+      formDataToSend.append('Host', restoreFormData.host)
+      
+      const isWindows = restoringBackup.os_type && restoringBackup.os_type.toLowerCase().includes('windows')
+      
+      if (isWindows) {
+        formDataToSend.append('username', restoreFormData.username || 'Administrator')
+        formDataToSend.append('password', restoreFormData.password)
+      } else {
+        formDataToSend.append('Username', restoreFormData.username)
+        if (restoreFormData.password) formDataToSend.append('Password', restoreFormData.password)
+        if (restoreFormData.key_path) formDataToSend.append('Key_path', restoreFormData.key_path)
+        if (restoreFormData.sudo_password) formDataToSend.append('Sudo_password', restoreFormData.sudo_password)
+      }
+
+      const response = await api.post('/backups/system/restore', formDataToSend, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+
+      if (response.data.status === 'SUCCESS') {
+        alert('System backup restored successfully!')
+        setShowRestoreForm(false)
+        setRestoringBackup(null)
+        setRestoreFormData({
+          host: '',
+          username: '',
+          password: '',
+          sudo_password: '',
+          key_path: ''
+        })
+      } else {
+        setError(response.data.message || 'Restore failed')
+      }
+    } catch (err) {
+      console.error('Error restoring backup:', err)
+      setError(err.response?.data?.detail || 'Failed to restore system backup')
+    } finally {
+      setRestoring(false)
+    }
+  }
+
   const getFilteredBackups = () => {
     let filtered = systemBackups
 
@@ -446,6 +523,13 @@ export default function SystemBackups() {
                   >
                     <Eye size={14} />
                     View Details
+                  </button>
+                  <button
+                    onClick={() => handleRestoreBackup(backup)}
+                    className="btn-restore"
+                  >
+                    <RotateCcw size={14} />
+                    Restore System
                   </button>
                   <button
                     onClick={() => handleDeleteBackup(backupId)}
@@ -921,6 +1005,107 @@ export default function SystemBackups() {
                 </button>
                 <button type="submit" disabled={creating} className="btn-primary">
                   {creating ? 'Creating...' : 'Create Schedule'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Restore Backup Modal */}
+      {showRestoreForm && restoringBackup && (
+        <div className="modal-overlay" onClick={() => setShowRestoreForm(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h2>Restore System Backup</h2>
+            <p className="restore-warning">
+              <strong>Backup ID:</strong> {restoringBackup.backup_id || restoringBackup._id}<br />
+              <strong>Original Host:</strong> {restoringBackup.host || 'Unknown'}<br />
+              <strong>OS Type:</strong> {(restoringBackup.os_type || 'unknown').toUpperCase()}
+            </p>
+            <form onSubmit={handleRestoreSubmit}>
+              <div className="form-group">
+                <label>Target Host *</label>
+                <input
+                  type="text"
+                  value={restoreFormData.host}
+                  onChange={(e) => setRestoreFormData({ ...restoreFormData, host: e.target.value })}
+                  placeholder="192.168.1.100"
+                  required
+                />
+              </div>
+
+              {restoringBackup.os_type && restoringBackup.os_type.toLowerCase().includes('windows') ? (
+                <>
+                  <div className="form-group">
+                    <label>Username</label>
+                    <input
+                      type="text"
+                      value={restoreFormData.username}
+                      onChange={(e) => setRestoreFormData({ ...restoreFormData, username: e.target.value })}
+                      placeholder="Administrator"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Password *</label>
+                    <input
+                      type="password"
+                      value={restoreFormData.password}
+                      onChange={(e) => setRestoreFormData({ ...restoreFormData, password: e.target.value })}
+                      placeholder="Windows password"
+                      required
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="form-group">
+                    <label>Username</label>
+                    <input
+                      type="text"
+                      value={restoreFormData.username}
+                      onChange={(e) => setRestoreFormData({ ...restoreFormData, username: e.target.value })}
+                      placeholder="root or your-username"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Password</label>
+                    <input
+                      type="password"
+                      value={restoreFormData.password}
+                      onChange={(e) => setRestoreFormData({ ...restoreFormData, password: e.target.value })}
+                      placeholder="SSH password"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>SSH Key Path</label>
+                    <input
+                      type="text"
+                      value={restoreFormData.key_path}
+                      onChange={(e) => setRestoreFormData({ ...restoreFormData, key_path: e.target.value })}
+                      placeholder="~/.ssh/id_ed25519"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Sudo Password</label>
+                    <input
+                      type="password"
+                      value={restoreFormData.sudo_password}
+                      onChange={(e) => setRestoreFormData({ ...restoreFormData, sudo_password: e.target.value })}
+                      placeholder="Sudo password if required"
+                    />
+                  </div>
+                </>
+              )}
+
+              <div className="modal-actions">
+                <button type="button" onClick={() => {
+                  setShowRestoreForm(false)
+                  setRestoringBackup(null)
+                }} className="btn-secondary">
+                  Cancel
+                </button>
+                <button type="submit" disabled={restoring} className="btn-primary">
+                  {restoring ? 'Restoring...' : 'Restore System'}
                 </button>
               </div>
             </form>

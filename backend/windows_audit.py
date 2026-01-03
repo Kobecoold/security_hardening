@@ -176,8 +176,29 @@ def run_winrm_audit(session: winrm.Session, rule: Dict) -> Dict:
         output = output.replace('\r\n', '\n').replace('\r', '\n')
         error_output = error_output.replace('\r\n', '\n').replace('\r', '\n')
         
-        # Kiểm tra kết quả
-        status = "PASS" if expected in output else "FAIL"
+        # Kiểm tra kết quả - case-insensitive và normalize whitespace
+        output_normalized = output.lower().strip()
+        expected_normalized = expected.lower().strip() if expected else ""
+        
+        # Check if expected value is in output (case-insensitive)
+        # Also check for common patterns like "= 1", "=1", " 1", etc.
+        if expected_normalized:
+            # Direct match
+            if expected_normalized in output_normalized:
+                status = "PASS"
+            else:
+                # Try to find pattern like "key = value" or "key=value" or "key value"
+                # Extract numeric values from output
+                import re
+                # Look for the expected value as a standalone number or after = or :
+                pattern = re.compile(r'[=:\s]+' + re.escape(expected_normalized) + r'(?:\s|$|,|;|\)|])', re.IGNORECASE)
+                if pattern.search(output_normalized):
+                    status = "PASS"
+                else:
+                    status = "FAIL"
+        else:
+            # If no expected value, check exit code
+            status = "PASS" if result.status_code == 0 else "FAIL"
         
         return {
             "id": rule["id"],

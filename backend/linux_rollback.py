@@ -78,12 +78,12 @@ class LinuxRollbackManager:
                         print(f"   ⚠️ Failed to backup {file_path}: {e}")
                 
                 # Backup file permissions cho TẤT CẢ files (không chỉ một số rules)
-                for file_path in files_to_backup:
-                    try:
-                        print(f"🔍 Backing up permissions for {file_path}...")
-                        perm_script = f"""
-                        timeout 5 sh -c 'if [ -e {file_path} ]; then stat -c "%a %U:%G" {file_path} 2>/dev/null || stat -f "%OLp %Su:%Sg" {file_path} 2>/dev/null || echo "unknown"; fi'
-                        """
+                    for file_path in files_to_backup:
+                        try:
+                            print(f"🔍 Backing up permissions for {file_path}...")
+                            perm_script = f"""
+                            timeout 5 sh -c 'if [ -e {file_path} ]; then stat -c "%a %U:%G" {file_path} 2>/dev/null || stat -f "%OLp %Su:%Sg" {file_path} 2>/dev/null || echo "unknown"; fi'
+                            """
                         # Try with sudo first for protected files
                         result = run_bash_check_stdin(ssh, perm_script, use_sudo=True, sudo_password=sudo_password, timeout=10)
                         if result["exit_status"] != 0 or not result["stdout"] or result["stdout"].strip() == "unknown":
@@ -92,10 +92,10 @@ class LinuxRollbackManager:
                         if result["exit_status"] == 0 and result["stdout"] and result["stdout"].strip() != "unknown":
                             # Create consistent key: strip leading /, replace / and . with _
                             file_key = file_path.lstrip("/").replace("/", "_").replace(".", "_")
-                            backup_data["data"][f"perms_{file_key}"] = result["stdout"].strip()
+                                backup_data["data"][f"perms_{file_key}"] = result["stdout"].strip()
                             print(f"   ✓ Permissions backed up for {file_path}: {result['stdout'].strip()}")
-                    except Exception as e:
-                        print(f"   ⚠️ Failed to backup permissions for {file_path}: {e}")
+                        except Exception as e:
+                            print(f"   ⚠️ Failed to backup permissions for {file_path}: {e}")
                 
                 # Backup sysctl settings nếu rule sửa sysctl (network rules 3.x)
                 if rule_id and any(x in rule_id for x in ['3.1.', '3.2.', '3.3.']):
@@ -146,13 +146,13 @@ class LinuxRollbackManager:
                         service_name = "auditd"
                     
                     if service_name:
-                        try:
+                    try:
                             print(f"🔍 Backing up {service_name} service status...")
                             status_script = f"""
                             timeout 5 sh -c 'systemctl is-active {service_name} 2>/dev/null || systemctl is-active {service_name}d 2>/dev/null || echo "unknown"'
-                            """
-                            result = run_bash_check_stdin(ssh, status_script, use_sudo=False, timeout=10)
-                            if result["exit_status"] == 0:
+                        """
+                        result = run_bash_check_stdin(ssh, status_script, use_sudo=False, timeout=10)
+                        if result["exit_status"] == 0:
                                 backup_data["data"][f"{service_name}_service_status"] = result["stdout"].strip()
                                 print(f"   ✓ {service_name} service status backed up: {result['stdout'].strip()}")
                             
@@ -196,7 +196,7 @@ class LinuxRollbackManager:
                             if result["exit_status"] == 0:
                                 backup_data["data"][f"{package_name}_installed"] = result["stdout"].strip()
                                 print(f"   ✓ {package_name} package status backed up")
-                        except Exception as e:
+                    except Exception as e:
                             print(f"   ⚠️ Failed to backup {package_name} package status: {e}")
                 
                 # Thêm thông tin backup
@@ -276,16 +276,16 @@ class LinuxRollbackManager:
         # Rule về SSH (5.2.x, 5.3.x)
         if any(x in rule_id for x in ['5.2.', '5.3.']):
             if '/etc/ssh/sshd_config' not in files_to_backup:
-                files_to_backup.append("/etc/ssh/sshd_config")
+            files_to_backup.append("/etc/ssh/sshd_config")
         
         # Rule về file system mounts (1.1.x)
         if '1.1.' in rule_id:
             if 'tmp' in rule_id.lower() or 'var/tmp' in rule_id.lower():
                 if '/etc/fstab' not in files_to_backup:
-                    files_to_backup.append("/etc/fstab")
+                files_to_backup.append("/etc/fstab")
             elif 'home' in rule_id.lower():
                 if '/etc/fstab' not in files_to_backup:
-                    files_to_backup.append("/etc/fstab")
+                files_to_backup.append("/etc/fstab")
         
         # Rule về file permissions (1.2.x, 1.3.x, 1.4.x, 1.7.x)
         if any(x in rule_id for x in ['1.2.', '1.3.', '1.4.', '1.7.']):
@@ -300,30 +300,30 @@ class LinuxRollbackManager:
             # Common system files
             elif 'passwd' in rule_id.lower():
                 if '/etc/passwd' not in files_to_backup:
-                    files_to_backup.append("/etc/passwd")
+                files_to_backup.append("/etc/passwd")
             elif 'group' in rule_id.lower():
                 if '/etc/group' not in files_to_backup:
-                    files_to_backup.append("/etc/group")
+                files_to_backup.append("/etc/group")
             elif 'shadow' in rule_id.lower():
                 if '/etc/shadow' not in files_to_backup:
-                    files_to_backup.append("/etc/shadow")
+                files_to_backup.append("/etc/shadow")
             elif 'gshadow' in rule_id.lower():
                 if '/etc/gshadow' not in files_to_backup:
-                    files_to_backup.append("/etc/gshadow")
+                files_to_backup.append("/etc/gshadow")
             elif 'fstab' in rule_id.lower():
                 if '/etc/fstab' not in files_to_backup:
-                    files_to_backup.append("/etc/fstab")
+                files_to_backup.append("/etc/fstab")
             elif 'crontab' in rule_id.lower():
                 if '/etc/crontab' not in files_to_backup:
-                    files_to_backup.append("/etc/crontab")
+                files_to_backup.append("/etc/crontab")
             elif 'hosts' in rule_id.lower():
                 if '/etc/hosts' not in files_to_backup:
-                    files_to_backup.append("/etc/hosts")
+                files_to_backup.append("/etc/hosts")
             elif 'issue' in rule_id.lower():
                 if '/etc/issue' not in files_to_backup:
-                    files_to_backup.append("/etc/issue")
+                files_to_backup.append("/etc/issue")
                 if '/etc/issue.net' not in files_to_backup:
-                    files_to_backup.append("/etc/issue.net")
+                files_to_backup.append("/etc/issue.net")
         
         # Rule về network (3.x) - sửa sysctl
         if rule_id.startswith('cis-') and any(x in rule_id for x in ['3.1.', '3.2.', '3.3.', '3.4.', '3.5.']):
