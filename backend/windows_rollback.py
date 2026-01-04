@@ -851,6 +851,103 @@ class RollbackManager:
                     
         except Exception as e:
             print(f"   ⚠️ Failed to backup audit policy: {e}")
+
+    def _restore_netsh_firewall(self, session: winrm.Session, backup_data: Dict, rollback_details: Dict):
+        """Restore firewall settings backed up via netsh."""
+        try:
+            for key, output in backup_data.items():
+                if not key.startswith("netsh_"):
+                    continue
+                setting = key.replace("netsh_", "").replace("_", " ")
+                original = (output or "").lower()
+                cmd = None
+                verify_cmd = None
+
+                if "state" in setting:
+                    desired = "on" if "on" in original else "off"
+                    cmd = f'netsh advfirewall set domainprofile state {desired}'
+                    verify_cmd = 'netsh advfirewall show domainprofile state'
+                elif "firewallpolicy" in setting:
+                    inbound = "blockinbound" if "blockinbound" in original else "allowinbound"
+                    cmd = f'netsh advfirewall set domainprofile firewallpolicy {inbound},allowoutbound'
+                    verify_cmd = 'netsh advfirewall show domainprofile firewallpolicy'
+                elif "settings" in setting:
+                    # inbound user notification on/off
+                    desired = "enable" if ("yes" in original or "on" in original or "enable" in original) else "disable"
+                    cmd = f'netsh advfirewall set domainprofile settings inboundusernotification {desired}'
+                    verify_cmd = 'netsh advfirewall show domainprofile settings'
+
+                if not cmd:
+                    continue
+
+                result = session.run_cmd(cmd)
+                verified = False
+                verify_output = ""
+                if verify_cmd:
+                    verify_result = session.run_cmd(verify_cmd)
+                    verify_output = verify_result.std_out.decode(errors="ignore").lower()
+                    if "state" in setting:
+                        verified = ("on" in verify_output) if "on" in original else ("off" in verify_output)
+                    elif "firewallpolicy" in setting:
+                        if "blockinbound" in original:
+                            verified = "blockinbound" in verify_output
+                        else:
+                            verified = "allowinbound" in verify_output
+                    elif "settings" in setting:
+                        if ("yes" in original or "on" in original or "enable" in original):
+                            verified = ("yes" in verify_output or "enable" in verify_output or "on" in verify_output)
+                        else:
+                            verified = ("no" in verify_output or "disable" in verify_output or "off" in verify_output)
+
+                rollback_details[key] = {
+                    "status": "RESTORED" if verified else "PARTIAL",
+                    "command": cmd,
+                    "exit_code": result.status_code,
+                    "verified": verified,
+                    "verify_output": verify_output[:200]
+                }
+                if verified:
+                    print(f"   ✓ Firewall setting restored: {setting}")
+                else:
+                    print(f"   ⚠️ Firewall setting restore not verified: {setting}")
+
+        except Exception as e:
+            print(f"   ⚠️ Failed to restore firewall settings: {e}")
+            rollback_details["netsh_error"] = str(e)
+
+    def _restore_auditpol_policy(self, session: winrm.Session, backup_data: Dict, rollback_details: Dict):
+        """Restore auditpol settings backed up earlier."""
+        try:
+            for key, val in backup_data.items():
+                if not key.startswith("auditpol_parsed_"):
+                    continue
+                subcat = key.replace("auditpol_parsed_", "").replace("_", " ")
+                success_state = val.get("success", "enable") if isinstance(val, dict) else "enable"
+                failure_state = val.get("failure", "enable") if isinstance(val, dict) else "enable"
+
+                cmd = f'auditpol /set /subcategory:"{subcat}" /success:{success_state} /failure:{failure_state}'
+                result = session.run_cmd(cmd)
+
+                # verify
+                verify = session.run_cmd(f'auditpol /get /subcategory:"{subcat}"')
+                verify_output = verify.std_out.decode(errors="ignore").lower()
+                verified = (success_state.lower() in verify_output) and (failure_state.lower() in verify_output)
+
+                rollback_details[f"auditpol_{subcat}"] = {
+                    "status": "RESTORED" if verified else "PARTIAL",
+                    "command": cmd,
+                    "exit_code": result.status_code,
+                    "verified": verified,
+                    "verify_output": verify_output[:200]
+                }
+                if verified:
+                    print(f"   ✓ Audit policy restored: {subcat}")
+                else:
+                    print(f"   ⚠️ Audit policy restore not verified: {subcat}")
+
+        except Exception as e:
+            print(f"   ⚠️ Failed to restore audit policies: {e}")
+            rollback_details["auditpol_error"] = str(e)
     
     def _backup_fallback_settings(self, session: winrm.Session, backup_data: Dict):
         """Fallback backup khi không xác định được loại cụ thể."""
