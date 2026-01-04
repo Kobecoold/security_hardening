@@ -368,14 +368,15 @@ class RollbackManager:
             # Collect tất cả backup plans từ tất cả rules
             all_backup_plans = []
             all_registry_keys = set()
-            all_policies = set()
+            # Lưu rule-specific settings: {rule_id: {setting_name: value}}
+            rule_specific_settings = {}
             
             for rule_id in rule_ids:
                 if rule_id:
                     backup_plan = self._get_settings_to_backup_for_rule(rule_id)
                     all_backup_plans.append(backup_plan)
                     
-                    # Collect registry keys và policies
+                    # Collect registry keys
                     registry_extracted = False
                     if backup_plan.get("type") == "registry":
                         reg_path = backup_plan.get("registry_path")
@@ -412,31 +413,45 @@ class RollbackManager:
                         except Exception as e:
                             print(f"   ⚠️ Failed to extract registry from rule YAML for {rule_id}: {e}")
                     
-                    policies = backup_plan.get("policies", [])
-                    if policies:
-                        all_policies.update(policies)
-                    
-                    # Backup các loại settings khác dựa vào type (không chỉ policies)
+                    # Lưu rule-specific settings để backup riêng từng setting
                     backup_type = backup_plan.get("type")
                     if backup_type == "net_accounts":
-                        # Đánh dấu cần backup net_accounts
-                        all_policies.add("password")
+                        # Lưu settings cần backup cho rule này
+                        settings = backup_plan.get("settings", [])
+                        if settings:
+                            rule_specific_settings[rule_id] = {
+                                "type": "net_accounts",
+                                "settings": settings
+                            }
+                            print(f"   📋 Rule {rule_id}: type={backup_type}, settings={settings}")
                     elif backup_type == "net_user":
-                        # Đánh dấu cần backup net_user guest
-                        all_policies.add("guest")
+                        rule_specific_settings[rule_id] = {
+                            "type": "net_user",
+                            "settings": backup_plan.get("settings", [])
+                        }
+                        print(f"   📋 Rule {rule_id}: type={backup_type}, settings={backup_plan.get('settings', [])}")
                     elif backup_type == "secedit":
-                        # Đánh dấu cần backup secedit
-                        all_policies.add("secedit")
+                        rule_specific_settings[rule_id] = {
+                            "type": "secedit",
+                            "settings": backup_plan.get("settings", [])
+                        }
+                        print(f"   📋 Rule {rule_id}: type={backup_type}, settings={backup_plan.get('settings', [])}")
                     elif backup_type == "netsh":
-                        # Đánh dấu cần backup netsh
-                        all_policies.add("netsh")
+                        rule_specific_settings[rule_id] = {
+                            "type": "netsh",
+                            "settings": backup_plan.get("settings", [])
+                        }
+                        print(f"   📋 Rule {rule_id}: type={backup_type}, settings={backup_plan.get('settings', [])}")
                     elif backup_type == "auditpol":
-                        # Đánh dấu cần backup auditpol
-                        all_policies.add("auditpol")
-                    
-                    print(f"   📋 Rule {rule_id}: type={backup_type}")
+                        rule_specific_settings[rule_id] = {
+                            "type": "auditpol",
+                            "settings": backup_plan.get("settings", [])
+                        }
+                        print(f"   📋 Rule {rule_id}: type={backup_type}, settings={backup_plan.get('settings', [])}")
+                    else:
+                        print(f"   📋 Rule {rule_id}: type={backup_type}")
             
-            print(f"✅ Total unique settings to backup: {len(all_registry_keys)} registry keys, {len(all_policies)} policies/settings")
+            print(f"✅ Total unique settings to backup: {len(all_registry_keys)} registry keys, {len(rule_specific_settings)} rule-specific settings")
             
             backup_data = {
                 "host": host,
@@ -503,26 +518,85 @@ class RollbackManager:
                     except Exception as e:
                         print(f"   ⚠️ Failed to backup registry {reg_path}\\{value_name}: {e}")
                 
-                # Backup policies và các loại settings khác
-                for policy in all_policies:
+                # Backup rule-specific settings (mỗi rule chỉ backup những gì nó sửa)
+                # Đầu tiên, lấy tất cả net_accounts output một lần để parse
+                net_accounts_output = None
+                if any(rule_info.get("type") == "net_accounts" for rule_info in rule_specific_settings.values()):
                     try:
-                        print(f"🔍 Backing up policy: {policy}...")
-                        if policy == "password" or policy == "net_accounts":
-                            self._backup_net_accounts(session, backup_data)
-                        elif policy == "guest" or policy == "net_user":
-                            self._backup_net_user_guest(session, backup_data)
-                        elif policy == "secedit":
+                        print("🔍 Getting net accounts output for parsing...")
+                        result = session.run_cmd('net accounts')
+                        if result.status_code == 0:
+                            net_accounts_output = result.std_out.decode().strip()
+                            print(f"   ✓ Net accounts output retrieved ({len(net_accounts_output)} bytes)")
+                    except Exception as e:
+                        print(f"   ⚠️ Failed to get net accounts output: {e}")
+                
+                # Backup từng setting riêng biệt cho mỗi rule
+                for rule_id, rule_info in rule_specific_settings.items():
+                    try:
+                        rule_type = rule_info.get("type")
+                        settings = rule_info.get("settings", [])
+                        
+                        if rule_type == "net_accounts" and net_accounts_output:
+                            # Parse và backup chỉ những settings mà rule này sửa
+                            for setting in settings:
+                                if setting == "/uniquepw":
+                                    # Rule 1.1.1: PasswordHistorySize
+                                    for line in net_accounts_output.split('\n'):
+                                        if 'Length of password history maintained' in line:
+                                            match = re.search(r':\s+(\d+)', line)
+                                            if match:
+                                                value = match.group(1)
+                                                backup_data["data"][f"net_accounts_{rule_id}_PasswordHistorySize"] = value
+                                                print(f"   ✓ Rule {rule_id}: backed up PasswordHistorySize = {value}")
+                                                break
+                                elif setting == "/maxpwage":
+                                    # Rule 1.1.2: MaximumPasswordAge
+                                    for line in net_accounts_output.split('\n'):
+                                        if 'Maximum password age' in line:
+                                            match = re.search(r':\s+(\d+)', line)
+                                            if match:
+                                                value = match.group(1)
+                                                backup_data["data"][f"net_accounts_{rule_id}_MaximumPasswordAge"] = value
+                                                print(f"   ✓ Rule {rule_id}: backed up MaximumPasswordAge = {value}")
+                                                break
+                                elif setting == "/minpwlen":
+                                    # Rule 1.1.4: MinimumPasswordLength
+                                    for line in net_accounts_output.split('\n'):
+                                        if 'Minimum password length' in line:
+                                            match = re.search(r':\s+(\d+)', line)
+                                            if match:
+                                                value = match.group(1)
+                                                backup_data["data"][f"net_accounts_{rule_id}_MinimumPasswordLength"] = value
+                                                print(f"   ✓ Rule {rule_id}: backed up MinimumPasswordLength = {value}")
+                                                break
+                        
+                        elif rule_type == "net_user":
+                            # Backup guest account status
+                            try:
+                                result = session.run_cmd('net user guest | findstr "Account active"')
+                                if result.status_code == 0:
+                                    output = result.std_out.decode().strip()
+                                    is_active = "Yes" in output or "yes" in output.lower()
+                                    backup_data["data"][f"net_user_{rule_id}_guest_active"] = is_active
+                                    print(f"   ✓ Rule {rule_id}: backed up guest account active = {is_active}")
+                            except Exception as e:
+                                print(f"   ⚠️ Failed to backup guest account for rule {rule_id}: {e}")
+                        
+                        elif rule_type == "secedit":
                             # Backup secedit sẽ được xử lý ở phần dưới
                             pass
-                        elif policy == "netsh":
+                        
+                        elif rule_type == "netsh":
                             # Backup netsh sẽ được xử lý ở phần dưới
                             pass
-                        elif policy == "auditpol":
+                        
+                        elif rule_type == "auditpol":
                             # Backup auditpol sẽ được xử lý ở phần dưới
                             pass
-                        # Có thể thêm các policies khác
+                            
                     except Exception as e:
-                        print(f"   ⚠️ Failed to backup policy {policy}: {e}")
+                        print(f"   ⚠️ Failed to backup rule-specific settings for {rule_id}: {e}")
                 
                 # Backup secedit, netsh, auditpol nếu có rules liên quan hoặc trong all_policies
                 has_secedit = any(plan.get("type") == "secedit" for plan in all_backup_plans) or "secedit" in all_policies
@@ -904,16 +978,106 @@ class RollbackManager:
             # Rollback theo từng loại backup
             try:
                 if backup_type == "batch":
-                    # Batch backup - restore tất cả registry keys và policies từ backup data
-                    print("🔄 Restoring batch backup - processing all registry keys and policies...")
-                    # Restore registry keys (sẽ được xử lý ở phần dưới)
-                    # Restore policies nếu có
-                    if "net_accounts" in backup["data"] or "parsed_net_accounts" in backup["data"]:
-                        self._restore_net_accounts(session, backup["data"], rollback_details)
-                    if "guest_account_active" in backup["data"]:
-                        self._restore_net_user_guest(session, backup["data"], rollback_details)
+                    # Batch backup - restore tất cả registry keys và rule-specific settings
+                    print("🔄 Restoring batch backup - processing all registry keys and rule-specific settings...")
+                    
+                    # Restore rule-specific net_accounts settings (mỗi rule restore riêng setting của nó)
+                    backup_rule_ids = backup.get("rule_ids", [])
+                    net_accounts_restored = 0
+                    for rule_id in backup_rule_ids:
+                        # Kiểm tra từng setting đã được backup cho rule này
+                        if f"net_accounts_{rule_id}_PasswordHistorySize" in backup["data"]:
+                            value = backup["data"][f"net_accounts_{rule_id}_PasswordHistorySize"]
+                            cmd = f'net accounts /uniquepw:{value}'
+                            result = session.run_cmd(cmd)
+                            rollback_details[f"net_accounts_{rule_id}_PasswordHistorySize"] = {
+                                "operation": "net_accounts_restore",
+                                "status": "SUCCESS" if result.status_code == 0 else "FAILED",
+                                "rule_id": rule_id,
+                                "setting": "PasswordHistorySize",
+                                "value": value,
+                                "command": cmd,
+                                "exit_code": result.status_code
+                            }
+                            if result.status_code == 0:
+                                net_accounts_restored += 1
+                                print(f"   ✓ Rule {rule_id}: restored PasswordHistorySize = {value}")
+                            else:
+                                print(f"   ⚠️ Rule {rule_id}: failed to restore PasswordHistorySize")
+                        
+                        if f"net_accounts_{rule_id}_MaximumPasswordAge" in backup["data"]:
+                            value = backup["data"][f"net_accounts_{rule_id}_MaximumPasswordAge"]
+                            cmd = f'net accounts /maxpwage:{value}'
+                            result = session.run_cmd(cmd)
+                            rollback_details[f"net_accounts_{rule_id}_MaximumPasswordAge"] = {
+                                "operation": "net_accounts_restore",
+                                "status": "SUCCESS" if result.status_code == 0 else "FAILED",
+                                "rule_id": rule_id,
+                                "setting": "MaximumPasswordAge",
+                                "value": value,
+                                "command": cmd,
+                                "exit_code": result.status_code
+                            }
+                            if result.status_code == 0:
+                                net_accounts_restored += 1
+                                print(f"   ✓ Rule {rule_id}: restored MaximumPasswordAge = {value}")
+                            else:
+                                print(f"   ⚠️ Rule {rule_id}: failed to restore MaximumPasswordAge")
+                        
+                        if f"net_accounts_{rule_id}_MinimumPasswordLength" in backup["data"]:
+                            value = backup["data"][f"net_accounts_{rule_id}_MinimumPasswordLength"]
+                            cmd = f'net accounts /minpwlen:{value}'
+                            result = session.run_cmd(cmd)
+                            rollback_details[f"net_accounts_{rule_id}_MinimumPasswordLength"] = {
+                                "operation": "net_accounts_restore",
+                                "status": "SUCCESS" if result.status_code == 0 else "FAILED",
+                                "rule_id": rule_id,
+                                "setting": "MinimumPasswordLength",
+                                "value": value,
+                                "command": cmd,
+                                "exit_code": result.status_code
+                            }
+                            if result.status_code == 0:
+                                net_accounts_restored += 1
+                                print(f"   ✓ Rule {rule_id}: restored MinimumPasswordLength = {value}")
+                            else:
+                                print(f"   ⚠️ Rule {rule_id}: failed to restore MinimumPasswordLength")
+                        
+                        # Restore guest account nếu có
+                        if f"net_user_{rule_id}_guest_active" in backup["data"]:
+                            is_active = backup["data"][f"net_user_{rule_id}_guest_active"]
+                            cmd = f'net user guest /active:{"yes" if is_active else "no"}'
+                            result = session.run_cmd(cmd)
+                            rollback_details[f"net_user_{rule_id}_guest"] = {
+                                "operation": "net_user_restore",
+                                "status": "SUCCESS" if result.status_code == 0 else "FAILED",
+                                "rule_id": rule_id,
+                                "setting": "guest_active",
+                                "value": is_active,
+                                "command": cmd,
+                                "exit_code": result.status_code
+                            }
+                            if result.status_code == 0:
+                                print(f"   ✓ Rule {rule_id}: restored guest account active = {is_active}")
+                            else:
+                                print(f"   ⚠️ Rule {rule_id}: failed to restore guest account")
+                    
+                    if net_accounts_restored > 0:
+                        print(f"   ✅ Restored {net_accounts_restored} net_accounts settings")
+                    else:
+                        # Fallback: thử restore từ format cũ (parsed_net_accounts) nếu có
+                        if "parsed_net_accounts" in backup["data"]:
+                            print("   🔄 Found old format parsed_net_accounts, restoring...")
+                            self._restore_net_accounts(session, backup["data"], rollback_details)
+                        elif "net_accounts" in backup["data"]:
+                            print("   🔄 Found old format net_accounts, restoring...")
+                            self._restore_net_accounts(session, backup["data"], rollback_details)
+                    
+                    # Restore secedit nếu có
                     if "secedit_export" in backup["data"]:
+                        print("   🔄 Found secedit data, restoring...")
                         self._restore_secedit_policy(session, backup["data"], rollback_details)
+                    
                     # Registry keys sẽ được restore ở phần dưới
                 elif backup_type == "net_accounts":
                     self._restore_net_accounts(session, backup["data"], rollback_details)
