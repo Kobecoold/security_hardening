@@ -243,16 +243,20 @@ class LinuxRollbackManager:
             
             ssh = ssh_connect(host, username, key_path, password)
             
-            # Collect tất cả files cần backup từ tất cả rules (merge, không trùng lặp)
-            all_files_to_backup = set()
+            # Collect files cần backup cho từng rule riêng biệt (không merge)
+            # Lưu mapping: {rule_id: [list of files]}
+            rule_files_mapping = {}
             for rule_id in rule_ids:
                 if rule_id:
                     files = self._get_files_to_backup_for_rule(rule_id)
-                    all_files_to_backup.update(files)
+                    rule_files_mapping[rule_id] = files
                     print(f"   📋 Rule {rule_id}: {len(files)} files")
             
-            all_files_to_backup = list(all_files_to_backup)
-            print(f"✅ Total unique files to backup: {len(all_files_to_backup)}")
+            # Tính tổng unique files để log
+            all_unique_files = set()
+            for files in rule_files_mapping.values():
+                all_unique_files.update(files)
+            print(f"✅ Total unique files to backup: {len(all_unique_files)} (across {len(rule_ids)} rules)")
             
             backup_data = {
                 "host": host,
@@ -262,87 +266,134 @@ class LinuxRollbackManager:
                 "backup_id": f"backup_{int(datetime.utcnow().timestamp())}",
                 "rule_ids": rule_ids,  # Lưu danh sách rules
                 "rule_id": None,  # Không có rule_id đơn lẻ
+                "backup_type": "batch",
                 "data": {}
             }
             
             try:
-                # Backup các file (giống như create_backup nhưng cho nhiều rules)
-                for file_path in all_files_to_backup:
-                    try:
-                        print(f"🔍 Backing up {file_path}...")
-                        backup_script = f"""
-                        timeout 10 sh -c 'if [ -f {file_path} ]; then head -c 100000 {file_path}; fi'
-                        """
-                        result = run_bash_check_stdin(
-                            ssh, backup_script, use_sudo=False, timeout=15
-                        )
-                        
-                        if result["exit_status"] == 0 and result["stdout"]:
-                            content = result["stdout"][:100000]
-                            file_key = file_path.lstrip("/").replace("/", "_").replace(".", "_")
-                            backup_data["data"][f"file_{file_key}"] = content
-                            print(f"   ✓ {file_path} backed up ({len(content)} bytes)")
-                        else:
-                            result_sudo = run_bash_check_stdin(
-                                ssh, backup_script, use_sudo=True, sudo_password=sudo_password, timeout=15
+                # Backup từng file riêng biệt cho mỗi rule (giống Windows)
+                for rule_id, files in rule_files_mapping.items():
+                    for file_path in files:
+                        try:
+                            print(f"🔍 Backing up {file_path} for rule {rule_id}...")
+                            backup_script = f"""
+                            timeout 10 sh -c 'if [ -f {file_path} ]; then head -c 100000 {file_path}; fi'
+                            """
+                            result = run_bash_check_stdin(
+                                ssh, backup_script, use_sudo=False, timeout=15
                             )
-                            if result_sudo["exit_status"] == 0 and result_sudo["stdout"]:
-                                content = result_sudo["stdout"][:100000]
+                            
+                            if result["exit_status"] == 0 and result["stdout"]:
+                                content = result["stdout"][:100000]
                                 file_key = file_path.lstrip("/").replace("/", "_").replace(".", "_")
-                                backup_data["data"][f"file_{file_key}"] = content
-                                print(f"   ✓ {file_path} backed up with sudo ({len(content)} bytes)")
+                                # Lưu với key riêng cho từng rule: file_{rule_id}_{file_key}
+                                rule_id_safe = rule_id.replace(".", "_").replace("-", "_")
+                                backup_data["data"][f"file_{rule_id_safe}_{file_key}"] = content
+                                print(f"   ✓ Rule {rule_id}: {file_path} backed up ({len(content)} bytes)")
                             else:
-                                print(f"   ⚠️ Skipped {file_path} (not accessible)")
-                    except Exception as e:
-                        print(f"   ⚠️ Failed to backup {file_path}: {e}")
+                                result_sudo = run_bash_check_stdin(
+                                    ssh, backup_script, use_sudo=True, sudo_password=sudo_password, timeout=15
+                                )
+                                if result_sudo["exit_status"] == 0 and result_sudo["stdout"]:
+                                    content = result_sudo["stdout"][:100000]
+                                    file_key = file_path.lstrip("/").replace("/", "_").replace(".", "_")
+                                    rule_id_safe = rule_id.replace(".", "_").replace("-", "_")
+                                    backup_data["data"][f"file_{rule_id_safe}_{file_key}"] = content
+                                    print(f"   ✓ Rule {rule_id}: {file_path} backed up with sudo ({len(content)} bytes)")
+                                else:
+                                    print(f"   ⚠️ Rule {rule_id}: Skipped {file_path} (not accessible)")
+                        except Exception as e:
+                            print(f"   ⚠️ Rule {rule_id}: Failed to backup {file_path}: {e}")
+                    
+                    # Backup file permissions cho từng rule
+                    for file_path in files:
+                        try:
+                            print(f"🔍 Backing up permissions for {file_path} (rule {rule_id})...")
+                            perm_script = f"""
+                            timeout 5 sh -c 'if [ -e {file_path} ]; then stat -c "%a %U:%G" {file_path} 2>/dev/null || stat -f "%OLp %Su:%Sg" {file_path} 2>/dev/null || echo "unknown"; fi'
+                            """
+                            result = run_bash_check_stdin(ssh, perm_script, use_sudo=True, sudo_password=sudo_password, timeout=10)
+                            if result["exit_status"] != 0 or not result["stdout"] or result["stdout"].strip() == "unknown":
+                                result = run_bash_check_stdin(ssh, perm_script, use_sudo=False, timeout=10)
+                            if result["exit_status"] == 0 and result["stdout"] and result["stdout"].strip() != "unknown":
+                                file_key = file_path.lstrip("/").replace("/", "_").replace(".", "_")
+                                rule_id_safe = rule_id.replace(".", "_").replace("-", "_")
+                                backup_data["data"][f"perms_{rule_id_safe}_{file_key}"] = result["stdout"].strip()
+                                print(f"   ✓ Rule {rule_id}: Permissions backed up for {file_path}: {result['stdout'].strip()}")
+                        except Exception as e:
+                            print(f"   ⚠️ Rule {rule_id}: Failed to backup permissions for {file_path}: {e}")
                 
-                # Backup file permissions
-                for file_path in all_files_to_backup:
-                    try:
-                        print(f"🔍 Backing up permissions for {file_path}...")
-                        perm_script = f"""
-                        timeout 5 sh -c 'if [ -e {file_path} ]; then stat -c "%a %U:%G" {file_path} 2>/dev/null || stat -f "%OLp %Su:%Sg" {file_path} 2>/dev/null || echo "unknown"; fi'
-                        """
-                        result = run_bash_check_stdin(ssh, perm_script, use_sudo=True, sudo_password=sudo_password, timeout=10)
-                        if result["exit_status"] != 0 or not result["stdout"] or result["stdout"].strip() == "unknown":
-                            result = run_bash_check_stdin(ssh, perm_script, use_sudo=False, timeout=10)
-                        if result["exit_status"] == 0 and result["stdout"] and result["stdout"].strip() != "unknown":
-                            file_key = file_path.lstrip("/").replace("/", "_").replace(".", "_")
-                            backup_data["data"][f"perms_{file_key}"] = result["stdout"].strip()
-                            print(f"   ✓ Permissions backed up for {file_path}: {result['stdout'].strip()}")
-                    except Exception as e:
-                        print(f"   ⚠️ Failed to backup permissions for {file_path}: {e}")
+                # Backup sysctl settings riêng cho từng rule (nếu rule đó sửa sysctl)
+                for rule_id in rule_ids:
+                    if rule_id and any(x in rule_id for x in ['3.1.', '3.2.', '3.3.']):
+                        try:
+                            print(f"🔍 Backing up sysctl settings for rule {rule_id}...")
+                            # Backup /etc/sysctl.conf nếu chưa có trong files của rule này
+                            if "/etc/sysctl.conf" not in rule_files_mapping.get(rule_id, []):
+                                # Backup file sysctl.conf cho rule này
+                                sysctl_file_path = "/etc/sysctl.conf"
+                                backup_script = f"""
+                                timeout 10 sh -c 'if [ -f {sysctl_file_path} ]; then head -c 100000 {sysctl_file_path}; fi'
+                                """
+                                result = run_bash_check_stdin(
+                                    ssh, backup_script, use_sudo=True, sudo_password=sudo_password, timeout=15
+                                )
+                                if result["exit_status"] == 0 and result["stdout"]:
+                                    content = result["stdout"][:100000]
+                                    rule_id_safe = rule_id.replace(".", "_").replace("-", "_")
+                                    backup_data["data"][f"file_{rule_id_safe}_etc_sysctl_conf"] = content
+                                    print(f"   ✓ Rule {rule_id}: /etc/sysctl.conf backed up")
+                            
+                            # Backup sysctl runtime values cho rule này
+                            sysctl_script = """
+                            timeout 10 sh -c 'sysctl -a 2>/dev/null | grep -E "^(net\.ipv4\.|net\.ipv6\.)" | head -50'
+                            """
+                            result = run_bash_check_stdin(ssh, sysctl_script, use_sudo=True, sudo_password=sudo_password, timeout=15)
+                            if result["exit_status"] == 0 and result["stdout"]:
+                                rule_id_safe = rule_id.replace(".", "_").replace("-", "_")
+                                backup_data["data"][f"sysctl_{rule_id_safe}_runtime"] = result["stdout"][:50000]
+                                print(f"   ✓ Rule {rule_id}: Sysctl runtime values backed up")
+                        except Exception as e:
+                            print(f"   ⚠️ Rule {rule_id}: Failed to backup sysctl settings: {e}")
                 
-                # Backup sysctl settings nếu có rules liên quan
-                if any(rule_id and any(x in rule_id for x in ['3.1.', '3.2.', '3.3.']) for rule_id in rule_ids):
-                    try:
-                        print("🔍 Backing up sysctl settings...")
-                        if "/etc/sysctl.conf" not in all_files_to_backup:
-                            all_files_to_backup.append("/etc/sysctl.conf")
-                        
-                        sysctl_script = """
-                        timeout 10 sh -c 'sysctl -a 2>/dev/null | grep -E "^(net\.ipv4\.|net\.ipv6\.)" | head -50'
-                        """
-                        result = run_bash_check_stdin(ssh, sysctl_script, use_sudo=True, sudo_password=sudo_password, timeout=15)
-                        if result["exit_status"] == 0 and result["stdout"]:
-                            backup_data["data"]["sysctl_runtime"] = result["stdout"][:50000]
-                            print(f"   ✓ Sysctl runtime values backed up")
-                    except Exception as e:
-                        print(f"   ⚠️ Failed to backup sysctl settings: {e}")
-                
-                # Backup services nếu có rules liên quan
-                if any(rule_id and any(x in rule_id for x in ['2.2.', '2.1.']) for rule_id in rule_ids):
-                    try:
-                        print("🔍 Backing up system services status...")
-                        services_script = """
-                        timeout 10 sh -c 'systemctl list-unit-files --type=service --state=enabled 2>/dev/null | grep -E "\.service" | awk "{print \\$1}" | head -100'
-                        """
-                        result = run_bash_check_stdin(ssh, services_script, use_sudo=True, sudo_password=sudo_password, timeout=15)
-                        if result["exit_status"] == 0 and result["stdout"]:
-                            backup_data["data"]["enabled_services"] = result["stdout"][:50000]
-                            print(f"   ✓ Enabled services backed up")
-                    except Exception as e:
-                        print(f"   ⚠️ Failed to backup services: {e}")
+                # Backup services riêng cho từng rule (nếu rule đó sửa services)
+                for rule_id in rule_ids:
+                    if rule_id and any(x in rule_id for x in ['2.2.', '2.1.', '4.', '5.']):
+                        try:
+                            # Detect service name từ rule
+                            service_name = None
+                            if 'ssh' in rule_id.lower() or '5.2.' in rule_id or '5.3.' in rule_id:
+                                service_name = "ssh"
+                            elif 'avahi' in rule_id.lower() or '2.2.2' in rule_id:
+                                service_name = "avahi-daemon"
+                            elif 'x11' in rule_id.lower() or '2.2.1' in rule_id:
+                                service_name = "xserver-xorg"
+                            elif 'cups' in rule_id.lower() or '2.2.3' in rule_id:
+                                service_name = "cups"
+                            elif 'audit' in rule_id.lower() or '4.1.' in rule_id:
+                                service_name = "auditd"
+                            
+                            if service_name:
+                                print(f"🔍 Backing up {service_name} service status for rule {rule_id}...")
+                                status_script = f"""
+                                timeout 5 sh -c 'systemctl is-active {service_name} 2>/dev/null || systemctl is-active {service_name}d 2>/dev/null || echo "unknown"'
+                                """
+                                result = run_bash_check_stdin(ssh, status_script, use_sudo=False, timeout=10)
+                                if result["exit_status"] == 0:
+                                    rule_id_safe = rule_id.replace(".", "_").replace("-", "_")
+                                    backup_data["data"][f"{rule_id_safe}_{service_name}_service_status"] = result["stdout"].strip()
+                                    print(f"   ✓ Rule {rule_id}: {service_name} service status backed up: {result['stdout'].strip()}")
+                                
+                                enabled_script = f"""
+                                timeout 5 sh -c 'systemctl is-enabled {service_name} 2>/dev/null || systemctl is-enabled {service_name}d 2>/dev/null || echo "unknown"'
+                                """
+                                result_enabled = run_bash_check_stdin(ssh, enabled_script, use_sudo=False, timeout=10)
+                                if result_enabled["exit_status"] == 0:
+                                    rule_id_safe = rule_id.replace(".", "_").replace("-", "_")
+                                    backup_data["data"][f"{rule_id_safe}_{service_name}_service_enabled"] = result_enabled["stdout"].strip()
+                                    print(f"   ✓ Rule {rule_id}: {service_name} service enabled status backed up: {result_enabled['stdout'].strip()}")
+                        except Exception as e:
+                            print(f"   ⚠️ Rule {rule_id}: Failed to backup service status: {e}")
                 
                 # Backup info
                 rule_count = len(rule_ids)
@@ -381,6 +432,41 @@ class LinuxRollbackManager:
             import traceback
             traceback.print_exc()
             return None
+    
+    def _extract_file_path_from_key(self, file_key: str) -> Optional[str]:
+        """Extract file path từ backup key (hỗ trợ cả format cũ và mới)."""
+        if not file_key:
+            return None
+        
+        # Extract file path từ key
+        if "boot_grub_grub_cfg" in file_key:
+            return "/boot/grub/grub.cfg"
+        elif "etc_passwd" in file_key:
+            return "/etc/passwd"
+        elif "etc_group" in file_key:
+            return "/etc/group"
+        elif "etc_fstab" in file_key:
+            return "/etc/fstab"
+        elif "etc_crontab" in file_key:
+            return "/etc/crontab"
+        elif "etc_hosts" in file_key:
+            return "/etc/hosts"
+        elif "etc_issue" in file_key:
+            if "issue_net" in file_key:
+                return "/etc/issue.net"
+            else:
+                return "/etc/issue"
+        elif "etc_sysctl_conf" in file_key:
+            return "/etc/sysctl.conf"
+        else:
+            # Try to reconstruct from key
+            # Remove "file_" prefix if present, then replace _ with / and add leading /
+            clean_key = file_key.replace("file_", "")
+            file_path = "/" + clean_key.replace("_", "/")
+            # Only return if it looks like a valid path
+            if file_path.startswith("/"):
+                return file_path
+        return None
     
     def _extract_files_from_script(self, script_content: str) -> List[str]:
         """Extract file paths từ remediation script bằng cách tìm các patterns phổ biến."""
@@ -709,49 +795,70 @@ rm /tmp/sshd_config_restore
                         print(f"   ⚠️ Error restoring SSH config: {e}")
                 
                 # 2. Khôi phục các file khác (không phải SSH config)
-                rule_id = backup.get("rule_id", "")
+                # Xác định loại backup (single rule hoặc batch)
+                backup_rule_id = backup.get("rule_id")
+                backup_rule_ids = backup.get("rule_ids", [])
+                is_batch_backup = backup_rule_ids is not None and len(backup_rule_ids) > 0
                 
-                # Map file keys to actual file paths
+                # Map file keys to actual file paths - hỗ trợ cả format cũ và mới
                 file_key_to_path = {}
                 for file_key in backup.get("data", {}).keys():
-                    if file_key.startswith("file_") and not file_key.startswith("file_etc_ssh_sshd_config"):
-                        # Extract file path từ key
-                        if "boot_grub_grub_cfg" in file_key:
-                            file_path = "/boot/grub/grub.cfg"
-                        elif "etc_passwd" in file_key:
-                            file_path = "/etc/passwd"
-                        elif "etc_group" in file_key:
-                            file_path = "/etc/group"
-                        elif "etc_fstab" in file_key:
-                            file_path = "/etc/fstab"
-                        elif "etc_crontab" in file_key:
-                            file_path = "/etc/crontab"
-                        elif "etc_hosts" in file_key:
-                            file_path = "/etc/hosts"
-                        elif "etc_issue" in file_key:
-                            if "issue_net" in file_key:
-                                file_path = "/etc/issue.net"
-                            else:
-                                file_path = "/etc/issue"
-                        else:
-                            # Try to reconstruct from key
-                            # Remove "file_" prefix, then replace _ with / and add leading /
-                            file_path = "/" + file_key.replace("file_", "").replace("_", "/")
-                            # Only process if it looks like a valid path
-                            if not file_path.startswith("/"):
+                    if not file_key.startswith("file_") or file_key.startswith("file_etc_ssh_sshd_config") or file_key == "backup_info":
+                        continue
+                    
+                    # Format mới: file_{rule_id}_{file_key} hoặc format cũ: file_{file_key}
+                    if is_batch_backup and "_" in file_key.replace("file_", ""):
+                        # Format mới: file_{rule_id}_{file_key}
+                        # Extract rule_id và file_key
+                        parts = file_key.replace("file_", "").split("_", 1)
+                        if len(parts) == 2:
+                            rule_id_part = parts[0]
+                            file_key_part = parts[1]
+                            # Chỉ restore nếu rule_id này có trong backup
+                            # Tìm rule_id thực tế từ rule_id_part (reverse sanitize)
+                            rule_id_matched = None
+                            for rid in backup_rule_ids:
+                                rid_safe = rid.replace(".", "_").replace("-", "_")
+                                if rid_safe == rule_id_part:
+                                    rule_id_matched = rid
+                                    break
+                            
+                            if not rule_id_matched:
+                                # Không match với rule nào trong backup, skip
                                 continue
-                        
-                        file_key_to_path[file_key] = file_path
+                            
+                            # Extract file path từ file_key_part
+                            file_path = self._extract_file_path_from_key(file_key_part)
+                            if file_path:
+                                file_key_to_path[file_key] = {
+                                    "path": file_path,
+                                    "rule_id": rule_id_matched
+                                }
+                        else:
+                            # Format không đúng, skip
+                            continue
+                    else:
+                        # Format cũ: file_{file_key} (backward compatibility)
+                        file_path = self._extract_file_path_from_key(file_key.replace("file_", ""))
+                        if file_path:
+                            file_key_to_path[file_key] = {
+                                "path": file_path,
+                                "rule_id": backup_rule_id or (backup_rule_ids[0] if backup_rule_ids else None)
+                            }
                 
-                # Restore file content và permissions
-                for file_key, file_path in file_key_to_path.items():
+                # Restore file content và permissions - restore từng file riêng biệt cho mỗi rule
+                for file_key, file_info in file_key_to_path.items():
                     try:
+                        file_path = file_info["path"] if isinstance(file_info, dict) else file_info
+                        rule_id_for_file = file_info.get("rule_id") if isinstance(file_info, dict) else None
+                        
                         file_content = backup.get("data", {}).get(file_key, "")
                         if not file_content:
-                            print(f"   ⚠️ No content found for {file_path}, skipping")
+                            print(f"   ⚠️ No content found for {file_path} (rule: {rule_id_for_file}), skipping")
                             continue
                         
-                        print(f"🔄 Restoring {file_path}...")
+                        rule_info = f" (rule: {rule_id_for_file})" if rule_id_for_file else ""
+                        print(f"🔄 Restoring {file_path}{rule_info}...")
                         
                         # Step 1: Restore file content
                         restore_content_script = f"""
@@ -769,6 +876,7 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                             print(f"   ⚠️ Failed to restore file content for {file_path}: {result_content.get('stderr', '')}")
                             rollback_details[file_path] = {
                                 "status": "FAILED",
+                                "rule_id": rule_id_for_file,
                                 "error": result_content.get("stderr", ""),
                                 "message": f"Failed to restore file content for {file_path}"
                             }
@@ -797,15 +905,32 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                                 content_verified = True
                         
                         if content_verified:
-                            print(f"   ✓ File content restored and verified for {file_path}")
+                            print(f"   ✓ File content restored and verified for {file_path}{rule_info}")
                         else:
-                            print(f"   ⚠️ File content restored but verification failed for {file_path}")
+                            print(f"   ⚠️ File content restored but verification failed for {file_path}{rule_info}")
                         
                         # Step 2: Restore permissions and ownership
-                        perms_key = f"perms_{file_key.replace('file_', '')}"
+                        # Tìm permissions key - hỗ trợ cả format cũ và mới
+                        perms_key = None
+                        if rule_id_for_file:
+                            # Format mới: perms_{rule_id}_{file_key}
+                            rule_id_safe = rule_id_for_file.replace(".", "_").replace("-", "_")
+                            file_key_part = file_key.replace("file_", "").split("_", 1)[-1] if "_" in file_key.replace("file_", "") else file_key.replace("file_", "")
+                            perms_key = f"perms_{rule_id_safe}_{file_key_part}"
+                        else:
+                            # Format cũ: perms_{file_key}
+                            perms_key = f"perms_{file_key.replace('file_', '')}"
+                        
+                        # Thử cả 2 format nếu không tìm thấy
                         perms_data = backup.get("data", {}).get(perms_key, "")
+                        if not perms_data and rule_id_for_file:
+                            # Fallback: thử format cũ
+                            old_perms_key = f"perms_{file_key.replace('file_', '')}"
+                            perms_data = backup.get("data", {}).get(old_perms_key, "")
                         
                         print(f"   🔍 Looking for permissions key: {perms_key}")
+                        if not perms_data:
+                            print(f"   🔍 Trying fallback permissions key...")
                         print(f"   🔍 Found permissions data: {perms_data if perms_data else 'NOT FOUND'}")
                         
                         if perms_data and perms_data != "unknown":
@@ -880,6 +1005,7 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                                     if len(verified_parts) >= 1 and verified_parts[0] == perms:
                                         rollback_details[file_path] = {
                                             "status": "RESTORED",
+                                            "rule_id": rule_id_for_file,
                                             "content_restored": True,
                                             "content_verified": content_verified if 'content_verified' in locals() else True,
                                             "permissions": perms,
@@ -888,7 +1014,7 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                                             "verified_perms": verified_perms,
                                             "message": f"File content and permissions restored: {perms} {owner}:{group} (verified: {verified_perms})"
                                         }
-                                        print(f"   ✓ Permissions restored for {file_path}: {perms} {owner}:{group} (verified: {verified_perms})")
+                                        print(f"   ✓ Permissions restored for {file_path}{rule_info}: {perms} {owner}:{group} (verified: {verified_perms})")
                                     else:
                                         rollback_details[file_path] = {
                                             "status": "PARTIAL",
@@ -944,51 +1070,98 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                             "message": f"Error restoring {file_path}: {e}"
                         }
                 
-                # 3. Khôi phục sysctl settings (nếu có trong backup)
-                if "sysctl_runtime" in backup.get("data", {}) or "file_etc_sysctl_conf" in backup.get("data", {}):
-                    try:
-                        print("🔄 Restoring sysctl settings...")
+                # 3. Khôi phục sysctl settings riêng cho từng rule (nếu có trong backup)
+                if is_batch_backup:
+                    # Restore sysctl cho từng rule riêng biệt
+                    for rule_id in backup_rule_ids:
+                        rule_id_safe = rule_id.replace(".", "_").replace("-", "_")
+                        sysctl_file_key = f"file_{rule_id_safe}_etc_sysctl_conf"
+                        sysctl_runtime_key = f"sysctl_{rule_id_safe}_runtime"
                         
-                        # Restore /etc/sysctl.conf nếu có
-                        sysctl_conf_key = None
-                        if "file_etc_sysctl_conf" in backup.get("data", {}):
-                            sysctl_conf_key = "file_etc_sysctl_conf"
-                        elif "sysctl_conf" in backup.get("data", {}):
-                            sysctl_conf_key = "sysctl_conf"
-                        
-                        if sysctl_conf_key:
-                            sysctl_content = backup["data"][sysctl_conf_key]
-                            restore_sysctl_script = f"""
-                            cat > /tmp/sysctl_restore << 'SYSCTL_EOF'
-                            {sysctl_content}
-                            SYSCTL_EOF
-                            cp /tmp/sysctl_restore /etc/sysctl.conf
-                            rm /tmp/sysctl_restore
-                            sysctl -p /etc/sysctl.conf >/dev/null 2>&1 || true
-                            """
-                            result = run_bash_check_stdin(
-                                ssh, restore_sysctl_script, use_sudo=True, sudo_password=sudo_password, timeout=15
-                            )
-                            if result["exit_status"] == 0:
-                                rollback_details["/etc/sysctl.conf"] = {
-                                    "status": "RESTORED",
-                                    "message": "Sysctl configuration restored"
+                        if sysctl_file_key in backup.get("data", {}):
+                            try:
+                                print(f"🔄 Restoring sysctl settings for rule {rule_id}...")
+                                sysctl_content = backup["data"][sysctl_file_key]
+                                restore_sysctl_script = f"""
+                                cat > /tmp/sysctl_restore_{rule_id_safe} << 'SYSCTL_EOF'
+                                {sysctl_content}
+                                SYSCTL_EOF
+                                cp /tmp/sysctl_restore_{rule_id_safe} /etc/sysctl.conf
+                                rm /tmp/sysctl_restore_{rule_id_safe}
+                                sysctl -p /etc/sysctl.conf >/dev/null 2>&1 || true
+                                """
+                                result = run_bash_check_stdin(
+                                    ssh, restore_sysctl_script, use_sudo=True, sudo_password=sudo_password, timeout=15
+                                )
+                                if result["exit_status"] == 0:
+                                    rollback_details[f"/etc/sysctl.conf_{rule_id}"] = {
+                                        "status": "RESTORED",
+                                        "rule_id": rule_id,
+                                        "message": f"Sysctl configuration restored for rule {rule_id}"
+                                    }
+                                    print(f"   ✓ Rule {rule_id}: Sysctl configuration restored")
+                                else:
+                                    rollback_details[f"/etc/sysctl.conf_{rule_id}"] = {
+                                        "status": "FAILED",
+                                        "rule_id": rule_id,
+                                        "error": result.get("stderr", ""),
+                                        "message": f"Failed to restore sysctl configuration for rule {rule_id}"
+                                    }
+                                    print(f"   ⚠️ Rule {rule_id}: Failed to restore sysctl config: {result.get('stderr', '')}")
+                            except Exception as e:
+                                print(f"   ⚠️ Rule {rule_id}: Error restoring sysctl settings: {e}")
+                                rollback_details[f"sysctl_{rule_id}"] = {
+                                    "status": "ERROR",
+                                    "rule_id": rule_id,
+                                    "error": str(e),
+                                    "message": f"Error restoring sysctl for rule {rule_id}: {e}"
                                 }
-                                print("   ✓ Sysctl configuration restored")
-                            else:
-                                rollback_details["/etc/sysctl.conf"] = {
-                                    "status": "FAILED",
-                                    "error": result.get("stderr", ""),
-                                    "message": "Failed to restore sysctl configuration"
-                                }
-                                print(f"   ⚠️ Failed to restore sysctl config: {result.get('stderr', '')}")
-                    except Exception as e:
-                        print(f"   ⚠️ Error restoring sysctl settings: {e}")
-                        rollback_details["sysctl"] = {
-                            "status": "ERROR",
-                            "error": str(e),
-                            "message": f"Error restoring sysctl: {e}"
-                        }
+                else:
+                    # Format cũ: restore sysctl chung (backward compatibility)
+                    if "sysctl_runtime" in backup.get("data", {}) or "file_etc_sysctl_conf" in backup.get("data", {}):
+                        try:
+                            print("🔄 Restoring sysctl settings...")
+                            
+                            # Restore /etc/sysctl.conf nếu có
+                            sysctl_conf_key = None
+                            if "file_etc_sysctl_conf" in backup.get("data", {}):
+                                sysctl_conf_key = "file_etc_sysctl_conf"
+                            elif "sysctl_conf" in backup.get("data", {}):
+                                sysctl_conf_key = "sysctl_conf"
+                            
+                            if sysctl_conf_key:
+                                sysctl_content = backup["data"][sysctl_conf_key]
+                                restore_sysctl_script = f"""
+                                cat > /tmp/sysctl_restore << 'SYSCTL_EOF'
+                                {sysctl_content}
+                                SYSCTL_EOF
+                                cp /tmp/sysctl_restore /etc/sysctl.conf
+                                rm /tmp/sysctl_restore
+                                sysctl -p /etc/sysctl.conf >/dev/null 2>&1 || true
+                                """
+                                result = run_bash_check_stdin(
+                                    ssh, restore_sysctl_script, use_sudo=True, sudo_password=sudo_password, timeout=15
+                                )
+                                if result["exit_status"] == 0:
+                                    rollback_details["/etc/sysctl.conf"] = {
+                                        "status": "RESTORED",
+                                        "message": "Sysctl configuration restored"
+                                    }
+                                    print("   ✓ Sysctl configuration restored")
+                                else:
+                                    rollback_details["/etc/sysctl.conf"] = {
+                                        "status": "FAILED",
+                                        "error": result.get("stderr", ""),
+                                        "message": "Failed to restore sysctl configuration"
+                                    }
+                                    print(f"   ⚠️ Failed to restore sysctl config: {result.get('stderr', '')}")
+                        except Exception as e:
+                            print(f"   ⚠️ Error restoring sysctl settings: {e}")
+                            rollback_details["sysctl"] = {
+                                "status": "ERROR",
+                                "error": str(e),
+                                "message": f"Error restoring sysctl: {e}"
+                            }
                 
                 # 4. Khôi phục mount options (nếu có trong backup)
                 if "mount_info" in backup.get("data", {}):
@@ -1005,89 +1178,187 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                     except Exception as e:
                         print(f"   ⚠️ Error processing mount info: {e}")
                 
-                # 5. Khôi phục service status (nếu có trong backup)
-                rule_id = backup.get("rule_id", "")
-                for key in backup.get("data", {}).keys():
-                    if key.endswith("_service_status") or key.endswith("_service_enabled"):
-                        service_name = key.replace("_service_status", "").replace("_service_enabled", "")
-                        try:
-                            print(f"🔄 Restoring {service_name} service status...")
-                            
-                            original_status = backup.get("data", {}).get(f"{service_name}_service_status", "unknown")
-                            original_enabled = backup.get("data", {}).get(f"{service_name}_service_enabled", "unknown")
-                            
-                            restore_service_script = ""
-                            
-                            # Restore enabled status
-                            if original_enabled != "unknown":
-                                if original_enabled == "enabled":
-                                    restore_service_script += f"systemctl enable {service_name} 2>/dev/null || systemctl enable {service_name}d 2>/dev/null || true\n"
-                                elif original_enabled == "disabled":
-                                    restore_service_script += f"systemctl disable {service_name} 2>/dev/null || systemctl disable {service_name}d 2>/dev/null || true\n"
-                            
-                            # Restore active status
-                            if original_status != "unknown":
-                                if original_status == "active":
-                                    restore_service_script += f"systemctl start {service_name} 2>/dev/null || systemctl start {service_name}d 2>/dev/null || true\n"
-                                elif original_status == "inactive":
-                                    restore_service_script += f"systemctl stop {service_name} 2>/dev/null || systemctl stop {service_name}d 2>/dev/null || true\n"
-                            
-                            if restore_service_script:
-                                result = run_bash_check_stdin(
-                                    ssh, restore_service_script, use_sudo=True, sudo_password=sudo_password, timeout=30
-                                )
+                # 5. Khôi phục service status riêng cho từng rule (nếu có trong backup)
+                if is_batch_backup:
+                    # Restore services cho từng rule riêng biệt
+                    for rule_id in backup_rule_ids:
+                        rule_id_safe = rule_id.replace(".", "_").replace("-", "_")
+                        for key in backup.get("data", {}).keys():
+                            # Format mới: {rule_id}_{service_name}_service_status
+                            if key.startswith(f"{rule_id_safe}_") and (key.endswith("_service_status") or key.endswith("_service_enabled")):
+                                service_name = key.replace(f"{rule_id_safe}_", "").replace("_service_status", "").replace("_service_enabled", "")
+                                try:
+                                    print(f"🔄 Restoring {service_name} service status for rule {rule_id}...")
+                                    
+                                    original_status = backup.get("data", {}).get(f"{rule_id_safe}_{service_name}_service_status", "unknown")
+                                    original_enabled = backup.get("data", {}).get(f"{rule_id_safe}_{service_name}_service_enabled", "unknown")
+                                    
+                                    restore_service_script = ""
+                                    
+                                    # Restore enabled status
+                                    if original_enabled != "unknown":
+                                        if original_enabled == "enabled":
+                                            restore_service_script += f"systemctl enable {service_name} 2>/dev/null || systemctl enable {service_name}d 2>/dev/null || true\n"
+                                        elif original_enabled == "disabled":
+                                            restore_service_script += f"systemctl disable {service_name} 2>/dev/null || systemctl disable {service_name}d 2>/dev/null || true\n"
+                                    
+                                    # Restore active status
+                                    if original_status != "unknown":
+                                        if original_status == "active":
+                                            restore_service_script += f"systemctl start {service_name} 2>/dev/null || systemctl start {service_name}d 2>/dev/null || true\n"
+                                        elif original_status == "inactive":
+                                            restore_service_script += f"systemctl stop {service_name} 2>/dev/null || systemctl stop {service_name}d 2>/dev/null || true\n"
+                                    
+                                    if restore_service_script:
+                                        result = run_bash_check_stdin(
+                                            ssh, restore_service_script, use_sudo=True, sudo_password=sudo_password, timeout=30
+                                        )
+                                        rollback_details[f"{service_name}_service_{rule_id}"] = {
+                                            "status": "RESTORED",
+                                            "rule_id": rule_id,
+                                            "original_status": original_status,
+                                            "original_enabled": original_enabled,
+                                            "message": f"Service {service_name} status restored for rule {rule_id}"
+                                        }
+                                        print(f"   ✓ Rule {rule_id}: {service_name} service status restored: {original_status}/{original_enabled}")
+                                except Exception as e:
+                                    print(f"   ⚠️ Rule {rule_id}: Error restoring {service_name} service: {e}")
+                                    rollback_details[f"{service_name}_service_{rule_id}"] = {
+                                        "status": "ERROR",
+                                        "rule_id": rule_id,
+                                        "error": str(e),
+                                        "message": f"Error restoring {service_name} service for rule {rule_id}: {e}"
+                                    }
+                else:
+                    # Format cũ: restore services chung (backward compatibility)
+                    rule_id = backup.get("rule_id", "")
+                    for key in backup.get("data", {}).keys():
+                        if key.endswith("_service_status") or key.endswith("_service_enabled"):
+                            service_name = key.replace("_service_status", "").replace("_service_enabled", "")
+                            try:
+                                print(f"🔄 Restoring {service_name} service status...")
+                                
+                                original_status = backup.get("data", {}).get(f"{service_name}_service_status", "unknown")
+                                original_enabled = backup.get("data", {}).get(f"{service_name}_service_enabled", "unknown")
+                                
+                                restore_service_script = ""
+                                
+                                # Restore enabled status
+                                if original_enabled != "unknown":
+                                    if original_enabled == "enabled":
+                                        restore_service_script += f"systemctl enable {service_name} 2>/dev/null || systemctl enable {service_name}d 2>/dev/null || true\n"
+                                    elif original_enabled == "disabled":
+                                        restore_service_script += f"systemctl disable {service_name} 2>/dev/null || systemctl disable {service_name}d 2>/dev/null || true\n"
+                                
+                                # Restore active status
+                                if original_status != "unknown":
+                                    if original_status == "active":
+                                        restore_service_script += f"systemctl start {service_name} 2>/dev/null || systemctl start {service_name}d 2>/dev/null || true\n"
+                                    elif original_status == "inactive":
+                                        restore_service_script += f"systemctl stop {service_name} 2>/dev/null || systemctl stop {service_name}d 2>/dev/null || true\n"
+                                
+                                if restore_service_script:
+                                    result = run_bash_check_stdin(
+                                        ssh, restore_service_script, use_sudo=True, sudo_password=sudo_password, timeout=30
+                                    )
+                                    rollback_details[f"{service_name}_service"] = {
+                                        "status": "RESTORED",
+                                        "original_status": original_status,
+                                        "original_enabled": original_enabled,
+                                        "message": f"Service {service_name} status restored"
+                                    }
+                                    print(f"   ✓ {service_name} service status restored: {original_status}/{original_enabled}")
+                            except Exception as e:
+                                print(f"   ⚠️ Error restoring {service_name} service: {e}")
                                 rollback_details[f"{service_name}_service"] = {
-                                    "status": "RESTORED",
-                                    "original_status": original_status,
-                                    "original_enabled": original_enabled,
-                                    "message": f"Service {service_name} status restored"
+                                    "status": "ERROR",
+                                    "error": str(e),
+                                    "message": f"Error restoring {service_name} service: {e}"
                                 }
-                                print(f"   ✓ {service_name} service status restored: {original_status}/{original_enabled}")
-                        except Exception as e:
-                            print(f"   ⚠️ Error restoring {service_name} service: {e}")
-                            rollback_details[f"{service_name}_service"] = {
-                                "status": "ERROR",
-                                "error": str(e),
-                                "message": f"Error restoring {service_name} service: {e}"
-                            }
                 
-                # 6. Khôi phục packages (nếu có trong backup)
-                for key in backup.get("data", {}).keys():
-                    if key.endswith("_installed"):
-                        package_name = key.replace("_installed", "")
-                        try:
-                            print(f"🔄 Restoring {package_name} package...")
-                            
-                            original_status = backup.get("data", {}).get(key, "not_installed")
-                            
-                            if "not_installed" not in original_status.lower():
-                                # Package was installed, reinstall it
-                                restore_pkg_script = f"""
-                                export DEBIAN_FRONTEND=noninteractive
-                                timeout 120 apt-get install -y {package_name} 2>&1 || true
-                                """
-                                result = run_bash_check_stdin(
-                                    ssh, restore_pkg_script, use_sudo=True, sudo_password=sudo_password, timeout=180
-                                )
+                # 6. Khôi phục packages riêng cho từng rule (nếu có trong backup)
+                if is_batch_backup:
+                    # Restore packages cho từng rule riêng biệt
+                    for rule_id in backup_rule_ids:
+                        rule_id_safe = rule_id.replace(".", "_").replace("-", "_")
+                        for key in backup.get("data", {}).keys():
+                            # Format mới: {rule_id}_{package_name}_installed
+                            if key.startswith(f"{rule_id_safe}_") and key.endswith("_installed"):
+                                package_name = key.replace(f"{rule_id_safe}_", "").replace("_installed", "")
+                                try:
+                                    print(f"🔄 Restoring {package_name} package for rule {rule_id}...")
+                                    
+                                    original_status = backup.get("data", {}).get(key, "not_installed")
+                                    
+                                    if "not_installed" not in original_status.lower():
+                                        # Package was installed, reinstall it
+                                        restore_pkg_script = f"""
+                                        export DEBIAN_FRONTEND=noninteractive
+                                        timeout 120 apt-get install -y {package_name} 2>&1 || true
+                                        """
+                                        result = run_bash_check_stdin(
+                                            ssh, restore_pkg_script, use_sudo=True, sudo_password=sudo_password, timeout=180
+                                        )
+                                        rollback_details[f"{package_name}_package_{rule_id}"] = {
+                                            "status": "RESTORED" if result["exit_status"] == 0 else "PARTIAL",
+                                            "rule_id": rule_id,
+                                            "message": f"Package {package_name} reinstallation attempted for rule {rule_id}"
+                                        }
+                                        print(f"   ✓ Rule {rule_id}: {package_name} package reinstallation attempted")
+                                    else:
+                                        # Package was not installed, ensure it's removed
+                                        rollback_details[f"{package_name}_package_{rule_id}"] = {
+                                            "status": "SKIPPED",
+                                            "rule_id": rule_id,
+                                            "message": f"Package {package_name} was not installed originally for rule {rule_id}"
+                                        }
+                                        print(f"   ℹ️ Rule {rule_id}: {package_name} was not installed originally, skipping")
+                                except Exception as e:
+                                    print(f"   ⚠️ Rule {rule_id}: Error restoring {package_name} package: {e}")
+                                    rollback_details[f"{package_name}_package_{rule_id}"] = {
+                                        "status": "ERROR",
+                                        "rule_id": rule_id,
+                                        "error": str(e),
+                                        "message": f"Error restoring {package_name} package for rule {rule_id}: {e}"
+                                    }
+                else:
+                    # Format cũ: restore packages chung (backward compatibility)
+                    for key in backup.get("data", {}).keys():
+                        if key.endswith("_installed"):
+                            package_name = key.replace("_installed", "")
+                            try:
+                                print(f"🔄 Restoring {package_name} package...")
+                                
+                                original_status = backup.get("data", {}).get(key, "not_installed")
+                                
+                                if "not_installed" not in original_status.lower():
+                                    # Package was installed, reinstall it
+                                    restore_pkg_script = f"""
+                                    export DEBIAN_FRONTEND=noninteractive
+                                    timeout 120 apt-get install -y {package_name} 2>&1 || true
+                                    """
+                                    result = run_bash_check_stdin(
+                                        ssh, restore_pkg_script, use_sudo=True, sudo_password=sudo_password, timeout=180
+                                    )
+                                    rollback_details[f"{package_name}_package"] = {
+                                        "status": "RESTORED" if result["exit_status"] == 0 else "PARTIAL",
+                                        "message": f"Package {package_name} reinstallation attempted"
+                                    }
+                                    print(f"   ✓ {package_name} package reinstallation attempted")
+                                else:
+                                    # Package was not installed, ensure it's removed
+                                    rollback_details[f"{package_name}_package"] = {
+                                        "status": "SKIPPED",
+                                        "message": f"Package {package_name} was not installed originally"
+                                    }
+                                    print(f"   ℹ️ {package_name} was not installed originally, skipping")
+                            except Exception as e:
+                                print(f"   ⚠️ Error restoring {package_name} package: {e}")
                                 rollback_details[f"{package_name}_package"] = {
-                                    "status": "RESTORED" if result["exit_status"] == 0 else "PARTIAL",
-                                    "message": f"Package {package_name} reinstallation attempted"
+                                    "status": "ERROR",
+                                    "error": str(e),
+                                    "message": f"Error restoring {package_name} package: {e}"
                                 }
-                                print(f"   ✓ {package_name} package reinstallation attempted")
-                            else:
-                                # Package was not installed, ensure it's removed
-                                rollback_details[f"{package_name}_package"] = {
-                                    "status": "SKIPPED",
-                                    "message": f"Package {package_name} was not installed originally"
-                                }
-                                print(f"   ℹ️ {package_name} was not installed originally, skipping")
-                        except Exception as e:
-                            print(f"   ⚠️ Error restoring {package_name} package: {e}")
-                            rollback_details[f"{package_name}_package"] = {
-                                "status": "ERROR",
-                                "error": str(e),
-                                "message": f"Error restoring {package_name} package: {e}"
-                            }
                 
                 # Reload services và apply changes sau khi restore files (tương tự Windows gpupdate)
                 files_restored = sum(1 for k, v in rollback_details.items() 

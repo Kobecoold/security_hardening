@@ -13,6 +13,7 @@ import Backups from './pages/Backups'
 import BackupDetail from './pages/BackupDetail'
 import SystemBackups from './pages/SystemBackups'
 import Users from './pages/Users'
+import RuleSync from './pages/RuleSync'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import Login from './pages/Login'
 import './App.css'
@@ -56,6 +57,7 @@ function AppRoutes() {
         <Route path="backups" element={<Backups />} />
         <Route path="backups/:id" element={<BackupDetail />} />
         <Route path="system-backups" element={<SystemBackups />} />
+        <Route path="rules/sync" element={<RuleSync />} />
         <Route path="users" element={<Users />} />
       </Route>
     </Routes>

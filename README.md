@@ -268,6 +268,7 @@ sudo iptables -A INPUT -p tcp --dport 8080 -j ACCEPT
 
 ### Utilities
 - `GET /rules` - Danh sách security rules
+- `POST /rules/sync` - Import rules từ SCAP/XCCDF/YAML vào `content/rules/auto`
 - `GET /healthz` - Health check
 - `GET /version` - Version info
 

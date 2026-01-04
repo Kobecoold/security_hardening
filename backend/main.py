@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Form, Depends, Security, Body
+from fastapi import FastAPI, HTTPException, Form, Depends, Security, Body, UploadFile, File
 from fastapi.security import APIKeyHeader
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -23,6 +23,7 @@ from linux_audit import detect_os, ssh_connect, run_bash_check_stdin, truncate_o
 from windows_audit import winrm_connect, run_winrm_audit, get_windows_host_info, detect_os_windows
 from auth import auth_manager, RequireAuth, API_KEY_HEADER
 from users import user_manager
+import rule_sync
 
 # Define API_KEY_HEADER for admin check
 if 'API_KEY_HEADER' not in globals():
@@ -389,6 +390,49 @@ async def get_rules(os_name: Optional[str] = None):
         return {"rules": load_rules()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/rules/sync", dependencies=[RequireAdmin])
+async def sync_rules_endpoint(
+    os_name: str = Form(..., description="OS name, ví dụ: ubuntu-22.04, windows-10"),
+    source: str = Form("ssg", description="Nguồn chuẩn, ví dụ: ssg/stig/sct/cis"),
+    profile: str = Form("level1", description="Profile hoặc baseline"),
+    url: Optional[str] = Form(None, description="URL tải SCAP/XCCDF hoặc YAML bundle"),
+    format_hint: Optional[str] = Form(None, description="xccdf | yaml (auto-detect nếu bỏ trống)"),
+    uploaded_file: UploadFile = File(None, description="Upload file SCAP/XCCDF hoặc YAML"),
+):
+    """Đồng bộ rules tự động từ chuẩn (SCAP/XCCDF/YAML) mà không cần viết YAML thủ công."""
+    if not url and uploaded_file is None:
+        raise HTTPException(status_code=400, detail="Cần cung cấp url hoặc file upload để sync rules")
+
+    raw_file: Optional[bytes] = None
+    if uploaded_file is not None:
+        raw_file = await uploaded_file.read()
+
+    try:
+        output_path, total_rules = rule_sync.sync_rules(
+            os_name=os_name,
+            source=source,
+            profile=profile,
+            url=url,
+            raw_file=raw_file,
+            format_hint=format_hint,
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {
+        "message": "Rules synced successfully",
+        "saved_to": output_path,
+        "total_rules": total_rules,
+        "os": os_name,
+        "source": source,
+        "profile": profile,
+        "format": format_hint or "auto-detect",
+        "note": "Rules được lưu tại content/rules/auto và sẽ được dùng khi gọi /rules hoặc audit auto-detect.",
+    }
 
 @app.post("/audit/linux", dependencies=[RequireAdmin])
 async def audit_linux_json(

@@ -8,7 +8,8 @@ import {
   Wrench,
   LogOut,
   Database,
-  Users
+  Users,
+  FilePlus
 } from 'lucide-react'
 import './Layout.css'
 
@@ -24,6 +25,7 @@ export default function Layout() {
     { path: '/backups', label: 'Rule Backups', icon: Database },
     ...(userRole === 'admin' ? [
       { path: '/system-backups', label: 'System Backups', icon: Database },
+      { path: '/rules/sync', label: 'Rule Sync', icon: FilePlus },
       { path: '/users', label: 'Users', icon: Users }
     ] : [])
   ]

@@ -6,71 +6,19 @@ from typing import List, Dict, Optional
 # Đường dẫn tới thư mục rule gốc (tương đối theo repo)
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 RULES_DIR = os.path.join(REPO_ROOT, "content", "rules")
+AUTO_RULES_DIR = os.path.join(RULES_DIR, "auto")
 SCRIPTS_DIR = os.path.join(REPO_ROOT, "scripts", "remediation")
 
 
-def load_rules(os_type: Optional[str] = None) -> List[Dict]:
-    """Đọc và parse tất cả file YAML trong thư mục Windows (windows-10 hoặc windows-11).
-    
-    Args:
-        os_type: Loại OS (windows-10, windows-11). Nếu None, sẽ thử cả hai.
-    """
-    # Xác định thư mục Windows rules
-    if os_type and os_type.startswith("windows"):
-        windows_dirs = [os.path.join(RULES_DIR, os_type)]
-    else:
-        # Thử cả windows-10 và windows-11
-        windows_dirs = [
-            os.path.join(RULES_DIR, "windows-10"),
-            os.path.join(RULES_DIR, "windows-11")
-        ]
-    
+def _load_rules_from_dir(directory: str, optional: bool = False) -> List[Dict]:
+    """Helper: load YAML rules from a directory (recursive)."""
+    if not os.path.isdir(directory):
+        if optional:
+            return []
+        raise FileNotFoundError(f"Rules directory not found: {directory}")
+
     rules: List[Dict] = []
-    
-    # Đệ quy tìm tất cả file .yaml/.yml trong các thư mục Windows
-    for windows_dir in windows_dirs:
-        if not os.path.exists(windows_dir):
-            continue
-        
-        for root, dirs, files in os.walk(windows_dir):
-            for entry in sorted(files):
-                if not entry.lower().endswith((".yml", ".yaml")):
-                    continue
-                file_path = os.path.join(root, entry)
-                try:
-                    with open(file_path, "r", encoding="utf-8") as f:
-                        data = yaml.safe_load(f)
-                        if data is None:
-                            continue
-                        if isinstance(data, list):
-                            rules.extend(data)
-                        elif isinstance(data, dict):
-                            rules.append(data)
-                except Exception as exc:
-                    # Bỏ qua file hỏng nhưng ghi chú lỗi
-                    print(f"Warning: Failed to load rules from {file_path}: {exc}")
-                    continue
-    
-    if not rules:
-        raise FileNotFoundError(f"No valid Windows rules found in {windows_dirs}")
-    
-    return rules
-
-
-def load_rules_by_os(os_name: str) -> List[Dict]:
-    """Nạp tất cả rule YAML theo thư mục hệ điều hành, ví dụ: ubuntu-22.04, debian-12.
-
-    Hỗ trợ cấu trúc phẳng hoặc theo subfolder (kernel, ssh, network...).
-    Trả về danh sách rule (mỗi rule là dict). Hỗ trợ cả file YAML trả về 1 rule hoặc danh sách rule.
-    """
-    os_dir = os.path.join(RULES_DIR, os_name)
-    if not os.path.isdir(os_dir):
-        raise FileNotFoundError(f"Rules directory not found for OS '{os_name}': {os_dir}")
-    
-    rules: List[Dict] = []
-    
-    # Đệ quy tìm tất cả file .yaml/.yml
-    for root, dirs, files in os.walk(os_dir):
+    for root, dirs, files in os.walk(directory):
         for entry in sorted(files):
             if not entry.lower().endswith((".yml", ".yaml")):
                 continue
@@ -85,9 +33,60 @@ def load_rules_by_os(os_name: str) -> List[Dict]:
                     elif isinstance(data, dict):
                         rules.append(data)
             except Exception as exc:
-                # Bỏ qua file hỏng nhưng ghi chú lỗi trong kết quả gọi API cấp trên
-                from fastapi import HTTPException
-                raise HTTPException(status_code=500, detail=f"Failed to load rules from {file_path}: {exc}")
+                # Bỏ qua file hỏng nhưng ghi chú lỗi
+                print(f"Warning: Failed to load rules from {file_path}: {exc}")
+                continue
+    return rules
+
+
+def load_rules(os_type: Optional[str] = None, include_auto: bool = True) -> List[Dict]:
+    """Đọc và parse tất cả file YAML trong thư mục Windows (windows-10 hoặc windows-11).
+    
+    Args:
+        os_type: Loại OS (windows-10, windows-11). Nếu None, sẽ thử cả hai.
+        include_auto: Nếu True, load thêm rules auto-sync trong content/rules/auto.
+    """
+    # Xác định thư mục Windows rules
+    if os_type and os_type.startswith("windows"):
+        windows_dirs = [os.path.join(RULES_DIR, os_type)]
+    else:
+        # Thử cả windows-10 và windows-11
+        windows_dirs = [
+            os.path.join(RULES_DIR, "windows-10"),
+            os.path.join(RULES_DIR, "windows-11")
+        ]
+    rules: List[Dict] = []
+
+    # Load built-in Windows rules
+    for windows_dir in windows_dirs:
+        rules.extend(_load_rules_from_dir(windows_dir, optional=True))
+
+    # Load auto-synced Windows rules (nếu có)
+    if include_auto:
+        for windows_dir in windows_dirs:
+            os_name = os.path.basename(windows_dir)
+            auto_dir = os.path.join(AUTO_RULES_DIR, os_name)
+            rules.extend(_load_rules_from_dir(auto_dir, optional=True))
+
+    if not rules:
+        raise FileNotFoundError(f"No valid Windows rules found in {windows_dirs}")
+
+    return rules
+
+
+def load_rules_by_os(os_name: str, include_auto: bool = True) -> List[Dict]:
+    """Nạp tất cả rule YAML theo thư mục hệ điều hành, ví dụ: ubuntu-22.04, debian-12.
+
+    Hỗ trợ cấu trúc phẳng hoặc theo subfolder (kernel, ssh, network...).
+    Trả về danh sách rule (mỗi rule là dict). Hỗ trợ cả file YAML trả về 1 rule hoặc danh sách rule.
+    """
+    os_dir = os.path.join(RULES_DIR, os_name)
+    rules: List[Dict] = _load_rules_from_dir(os_dir, optional=False)
+
+    if include_auto:
+        auto_dir = os.path.join(AUTO_RULES_DIR, os_name)
+        rules.extend(_load_rules_from_dir(auto_dir, optional=True))
+
     return rules
 
 
