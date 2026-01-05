@@ -36,7 +36,9 @@ class LinuxRollbackManager:
                 "os_type": "linux",
                 "backup_id": f"backup_{int(datetime.utcnow().timestamp())}",
                 "rule_id": rule_id,  # Lưu rule_id để biết backup này dành cho rule nào
-                "data": {}
+                "data": {},
+                # Lưu map file_key -> file_path để restore không bị mất dấu chấm / thư mục .d
+                "paths": {}
             }
             
             # Xác định files cần backup dựa vào rule_id
@@ -60,6 +62,7 @@ class LinuxRollbackManager:
                             # Create consistent key: strip leading /, replace / and . with _
                             file_key = file_path.lstrip("/").replace("/", "_").replace(".", "_")
                             backup_data["data"][f"file_{file_key}"] = content
+                            backup_data["paths"][f"file_{file_key}"] = file_path
                             print(f"   ✓ {file_path} backed up ({len(content)} bytes)")
                         else:
                             # Thử với sudo nếu cần
@@ -71,6 +74,7 @@ class LinuxRollbackManager:
                                 # Create consistent key: strip leading /, replace / and . with _
                                 file_key = file_path.lstrip("/").replace("/", "_").replace(".", "_")
                                 backup_data["data"][f"file_{file_key}"] = content
+                                backup_data["paths"][f"file_{file_key}"] = file_path
                                 print(f"   ✓ {file_path} backed up with sudo ({len(content)} bytes)")
                             else:
                                 print(f"   ⚠️ Skipped {file_path} (not accessible)")
@@ -262,7 +266,8 @@ class LinuxRollbackManager:
                 "backup_id": f"backup_{int(datetime.utcnow().timestamp())}",
                 "rule_ids": rule_ids,  # Lưu danh sách rules
                 "rule_id": None,  # Không có rule_id đơn lẻ
-                "data": {}
+                "data": {},
+                "paths": {}
             }
             
             try:
@@ -281,6 +286,7 @@ class LinuxRollbackManager:
                             content = result["stdout"][:100000]
                             file_key = file_path.lstrip("/").replace("/", "_").replace(".", "_")
                             backup_data["data"][f"file_{file_key}"] = content
+                            backup_data["paths"][f"file_{file_key}"] = file_path
                             print(f"   ✓ {file_path} backed up ({len(content)} bytes)")
                         else:
                             result_sudo = run_bash_check_stdin(
@@ -290,6 +296,7 @@ class LinuxRollbackManager:
                                 content = result_sudo["stdout"][:100000]
                                 file_key = file_path.lstrip("/").replace("/", "_").replace(".", "_")
                                 backup_data["data"][f"file_{file_key}"] = content
+                                backup_data["paths"][f"file_{file_key}"] = file_path
                                 print(f"   ✓ {file_path} backed up with sudo ({len(content)} bytes)")
                             else:
                                 print(f"   ⚠️ Skipped {file_path} (not accessible)")
@@ -713,35 +720,46 @@ rm /tmp/sshd_config_restore
                 
                 # Map file keys to actual file paths
                 file_key_to_path = {}
+                path_map = backup.get("paths", {})
                 for file_key in backup.get("data", {}).keys():
-                    if file_key.startswith("file_") and not file_key.startswith("file_etc_ssh_sshd_config"):
-                        # Extract file path từ key
-                        if "boot_grub_grub_cfg" in file_key:
-                            file_path = "/boot/grub/grub.cfg"
-                        elif "etc_passwd" in file_key:
-                            file_path = "/etc/passwd"
-                        elif "etc_group" in file_key:
-                            file_path = "/etc/group"
-                        elif "etc_fstab" in file_key:
-                            file_path = "/etc/fstab"
-                        elif "etc_crontab" in file_key:
-                            file_path = "/etc/crontab"
-                        elif "etc_hosts" in file_key:
-                            file_path = "/etc/hosts"
-                        elif "etc_issue" in file_key:
-                            if "issue_net" in file_key:
-                                file_path = "/etc/issue.net"
-                            else:
-                                file_path = "/etc/issue"
-                        else:
-                            # Try to reconstruct from key
-                            # Remove "file_" prefix, then replace _ with / and add leading /
-                            file_path = "/" + file_key.replace("file_", "").replace("_", "/")
-                            # Only process if it looks like a valid path
-                            if not file_path.startswith("/"):
-                                continue
-                        
-                        file_key_to_path[file_key] = file_path
+                    if not file_key.startswith("file_") or file_key.startswith("file_etc_ssh_sshd_config"):
+                        continue
+
+                    # Prefer path map (new backups)
+                    if file_key in path_map:
+                        file_key_to_path[file_key] = path_map[file_key]
+                        continue
+
+                    # Fallback: heuristics for old backups (no paths map)
+                    if "boot_grub_grub_cfg" in file_key:
+                        file_path = "/boot/grub/grub.cfg"
+                    elif "etc_passwd" in file_key:
+                        file_path = "/etc/passwd"
+                    elif "etc_group" in file_key:
+                        file_path = "/etc/group"
+                    elif "etc_fstab" in file_key:
+                        file_path = "/etc/fstab"
+                    elif "etc_crontab" in file_key:
+                        file_path = "/etc/crontab"
+                    elif "etc_hosts" in file_key:
+                        file_path = "/etc/hosts"
+                    elif "etc_issue_net" in file_key:
+                        file_path = "/etc/issue.net"
+                    elif "etc_issue" in file_key:
+                        file_path = "/etc/issue"
+                    else:
+                        # Reconstruct from key (best-effort); fix common .d directories
+                        reconstructed = "/" + file_key.replace("file_", "").replace("_", "/")
+                        reconstructed = reconstructed.replace("/pam/d/", "/pam.d/")
+                        reconstructed = reconstructed.replace("/rsyslog/d/", "/rsyslog.d/")
+                        reconstructed = reconstructed.replace("/sysctl/conf", "/sysctl.conf")
+                        reconstructed = reconstructed.replace("/fstab", "/fstab")
+                        reconstructed = reconstructed.replace("/crontab", "/crontab")
+                        file_path = reconstructed
+                        if not file_path.startswith("/"):
+                            continue
+
+                    file_key_to_path[file_key] = file_path
                 
                 # Restore file content và permissions
                 for file_key, file_path in file_key_to_path.items():
