@@ -632,6 +632,7 @@ class LinuxRollbackManager:
             
             ssh = ssh_connect(host, username, key_path, password)
             rollback_details = {}
+            verification_results = {}
             
             try:
                 # 1. Khôi phục SSH Configuration (check cả 2 keys: "sshd_config" và "file_etc_ssh_sshd_config")
@@ -837,6 +838,38 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                                 "remount_stderr": remount_result.get("stderr", "")[:200],
                             })
                             print("   ℹ️ Remount attempted (check remount_exit/remount_stdout).")
+
+                            # Nếu fstab không còn entry cho /tmp hoặc /var/tmp nhưng mount vẫn đang tồn tại, thử umount
+                            restored_fstab = file_content
+                            need_umount_tmp = "/tmp" not in restored_fstab
+                            need_umount_vartmp = "/var/tmp" not in restored_fstab
+                            if need_umount_tmp or need_umount_vartmp:
+                                print("   🔄 Checking active mounts for /tmp and /var/tmp after fstab restore...")
+                                umount_script = """
+                                set -e
+                                current_mounts="$(mount)"
+                                if ! echo "$current_mounts" | grep -q " on /tmp "; then
+                                  echo "tmp_not_mounted"
+                                else
+                                  echo "tmp_mounted"
+                                  umount -l /tmp 2>/dev/null || true
+                                fi
+                                if ! echo "$current_mounts" | grep -q " on /var/tmp "; then
+                                  echo "vartmp_not_mounted"
+                                else
+                                  echo "vartmp_mounted"
+                                  umount -l /var/tmp 2>/dev/null || true
+                                fi
+                                """
+                                umount_result = run_bash_check_stdin(
+                                    ssh, umount_script, use_sudo=True, sudo_password=sudo_password, timeout=10
+                                )
+                                rollback_details["/etc/fstab"].update({
+                                    "umount_exit": umount_result.get("exit_status", 0),
+                                    "umount_stdout": umount_result.get("stdout", "")[:200],
+                                    "umount_stderr": umount_result.get("stderr", "")[:200],
+                                })
+                                print("   ℹ️ Umount attempted for tmp/var/tmp if they were still mounted.")
 
                         # Step 2: Restore permissions and ownership
                         perms_key = f"perms_{file_key.replace('file_', '')}"
@@ -1172,7 +1205,55 @@ rm /tmp/restore_{file_path.replace("/", "_")}
             finally:
                 ssh.close()
             
-            # Lưu rollback log
+            # 5. (Optional) Verify rule state after rollback
+            target_rule_ids: List[str] = []
+            if rule_id:
+                target_rule_ids = [rule_id]
+            elif backup.get("rule_ids"):
+                target_rule_ids = backup.get("rule_ids", [])
+            elif backup.get("rule_id"):
+                target_rule_ids = [backup.get("rule_id")]
+
+            try:
+                if target_rule_ids:
+                    print(f"🔍 Verifying rules after rollback: {target_rule_ids}")
+                    # Load rules from known OS directories (best-effort)
+                    rules_all = []
+                    try:
+                        from utils import load_rules_by_os
+                        for os_dir in ["ubuntu-20.04", "ubuntu-22.04", "debian-12"]:
+                            try:
+                                rules_all.extend(load_rules_by_os(os_dir, include_auto=True))
+                            except Exception:
+                                continue
+                    except Exception:
+                        pass
+
+                    for rid in target_rule_ids:
+                        rule_data = next((r for r in rules_all if r.get("id") == rid), None)
+                        if not rule_data:
+                            verification_results[rid] = {"status": "UNKNOWN", "message": "Rule not found for verification"}
+                            continue
+                        check_cmd = rule_data.get("check", {}).get("bash")
+                        if not check_cmd:
+                            verification_results[rid] = {"status": "SKIPPED", "message": "No bash check defined"}
+                            continue
+                        verify = run_bash_check_stdin(
+                            ssh, check_cmd, use_sudo=True, sudo_password=sudo_password, timeout=20
+                        )
+                        status = "PASS" if verify.get("exit_status") == 0 else "FAIL"
+                        verification_results[rid] = {
+                            "status": status,
+                            "exit_status": verify.get("exit_status"),
+                            "stdout": verify.get("stdout", "")[:300],
+                            "stderr": verify.get("stderr", "")[:200],
+                        }
+                        print(f"   ✓ Rule {rid} verification after rollback: {status}")
+            except Exception as e:
+                print(f"⚠️ Verification after rollback failed: {e}")
+                verification_results["error"] = str(e)
+
+            # Lưu rollback log + optional verification
             rollback_log = {
                 "host": host,
                 "backup_id": backup.get("backup_id", "unknown"),
@@ -1180,6 +1261,7 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                 "type": "rollback_executed",
                 "os_type": "linux",
                 "rollback_details": rollback_details,
+                "verification": verification_results,
                 "status": "SUCCESS" if all(d.get("status") in ["RESTORED", "SKIPPED"] for d in rollback_details.values()) else "PARTIAL"
             }
             
