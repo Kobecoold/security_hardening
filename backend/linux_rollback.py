@@ -820,9 +820,12 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                         else:
                             print(f"   ⚠️ File content restored but verification failed for {file_path}")
                         
-                        # If fstab restored, try to remount /tmp and /var/tmp to apply restored options
+                        # If fstab restored, try to remount/umount and reload mounts to reflect backup state
                         if file_path == "/etc/fstab":
-                            print("   🔄 Attempting remount /tmp and /var/tmp to apply restored fstab...")
+                            if "/etc/fstab" not in rollback_details:
+                                rollback_details["/etc/fstab"] = {}
+                            
+                            print("   🔄 Applying fstab changes (remount tmp/var/tmp)...")
                             remount_script = """
                             mount -o remount /tmp 2>/dev/null || true
                             mount -o remount /var/tmp 2>/dev/null || true
@@ -830,36 +833,26 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                             remount_result = run_bash_check_stdin(
                                 ssh, remount_script, use_sudo=True, sudo_password=sudo_password, timeout=10
                             )
-                            if "/etc/fstab" not in rollback_details:
-                                rollback_details["/etc/fstab"] = {}
                             rollback_details["/etc/fstab"].update({
                                 "remount_exit": remount_result.get("exit_status", 0),
                                 "remount_stdout": remount_result.get("stdout", "")[:200],
                                 "remount_stderr": remount_result.get("stderr", "")[:200],
                             })
-                            print("   ℹ️ Remount attempted (check remount_exit/remount_stdout).")
 
-                            # Nếu fstab không còn entry cho /tmp hoặc /var/tmp nhưng mount vẫn đang tồn tại, thử umount
                             restored_fstab = file_content
                             need_umount_tmp = "/tmp" not in restored_fstab
                             need_umount_vartmp = "/var/tmp" not in restored_fstab
                             if need_umount_tmp or need_umount_vartmp:
-                                print("   🔄 Checking active mounts for /tmp and /var/tmp after fstab restore...")
+                                print("   🔄 Removing mounts for tmp/var/tmp not present in restored fstab...")
                                 umount_script = """
-                                set -e
                                 current_mounts="$(mount)"
-                                if ! echo "$current_mounts" | grep -q " on /tmp "; then
-                                  echo "tmp_not_mounted"
-                                else
-                                  echo "tmp_mounted"
+                                if echo "$current_mounts" | grep -q " on /tmp "; then
                                   umount -l /tmp 2>/dev/null || true
                                 fi
-                                if ! echo "$current_mounts" | grep -q " on /var/tmp "; then
-                                  echo "vartmp_not_mounted"
-                                else
-                                  echo "vartmp_mounted"
+                                if echo "$current_mounts" | grep -q " on /var/tmp "; then
                                   umount -l /var/tmp 2>/dev/null || true
                                 fi
+                                mount | grep -E '(/tmp|/var/tmp)' || true
                                 """
                                 umount_result = run_bash_check_stdin(
                                     ssh, umount_script, use_sudo=True, sudo_password=sudo_password, timeout=10
@@ -869,7 +862,17 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                                     "umount_stdout": umount_result.get("stdout", "")[:200],
                                     "umount_stderr": umount_result.get("stderr", "")[:200],
                                 })
-                                print("   ℹ️ Umount attempted for tmp/var/tmp if they were still mounted.")
+
+                            # mount -a to ensure restored fstab applies to all entries
+                            mount_all_result = run_bash_check_stdin(
+                                ssh, "mount -a 2>/dev/null || true", use_sudo=True, sudo_password=sudo_password, timeout=15
+                            )
+                            rollback_details["/etc/fstab"].update({
+                                "mount_all_exit": mount_all_result.get("exit_status", 0),
+                                "mount_all_stdout": mount_all_result.get("stdout", "")[:200],
+                                "mount_all_stderr": mount_all_result.get("stderr", "")[:200],
+                            })
+                            print("   ℹ️ fstab apply attempt done (remount/umount/mount -a).")
 
                         # Step 2: Restore permissions and ownership
                         perms_key = f"perms_{file_key.replace('file_', '')}"
@@ -1208,11 +1211,11 @@ rm /tmp/restore_{file_path.replace("/", "_")}
             # 5. (Optional) Verify rule state after rollback
             target_rule_ids: List[str] = []
             if rule_id:
-                target_rule_ids = [rule_id]
-            elif backup.get("rule_ids"):
-                target_rule_ids = backup.get("rule_ids", [])
+                target_rule_ids = [rule_id]  # Ưu tiên rule_id được yêu cầu
             elif backup.get("rule_id"):
                 target_rule_ids = [backup.get("rule_id")]
+            elif backup.get("rule_ids"):
+                target_rule_ids = backup.get("rule_ids", [])
 
             try:
                 if target_rule_ids:
