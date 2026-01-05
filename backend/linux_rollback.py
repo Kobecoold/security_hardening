@@ -819,6 +819,25 @@ rm /tmp/restore_{file_path.replace("/", "_")}
                         else:
                             print(f"   ⚠️ File content restored but verification failed for {file_path}")
                         
+                        # If fstab restored, try to remount /tmp and /var/tmp to apply restored options
+                        if file_path == "/etc/fstab":
+                            print("   🔄 Attempting remount /tmp and /var/tmp to apply restored fstab...")
+                            remount_script = """
+                            mount -o remount /tmp 2>/dev/null || true
+                            mount -o remount /var/tmp 2>/dev/null || true
+                            """
+                            remount_result = run_bash_check_stdin(
+                                ssh, remount_script, use_sudo=True, sudo_password=sudo_password, timeout=10
+                            )
+                            if "/etc/fstab" not in rollback_details:
+                                rollback_details["/etc/fstab"] = {}
+                            rollback_details["/etc/fstab"].update({
+                                "remount_exit": remount_result.get("exit_status", 0),
+                                "remount_stdout": remount_result.get("stdout", "")[:200],
+                                "remount_stderr": remount_result.get("stderr", "")[:200],
+                            })
+                            print("   ℹ️ Remount attempted (check remount_exit/remount_stdout).")
+
                         # Step 2: Restore permissions and ownership
                         perms_key = f"perms_{file_key.replace('file_', '')}"
                         perms_data = backup.get("data", {}).get(perms_key, "")
