@@ -275,6 +275,7 @@ function WindowsAuditForm() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
+  const [successMessage, setSuccessMessage] = useState('')
 
   const [formData, setFormData] = useState({
     host: '',
@@ -290,7 +291,8 @@ function WindowsAuditForm() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
-    setSuccess(false)
+    setSuccessMessage('')
+    setSuccess(false)   
     setLoading(true)
 
     try {
@@ -305,6 +307,7 @@ function WindowsAuditForm() {
         }
       })
 
+      setSuccessMessage('Audit thành công')
       setSuccess(true)
       window.alert('Audit thành công')
       setTimeout(() => {
@@ -390,7 +393,7 @@ function WindowsAuditForm() {
           {success && (
             <div className="success-banner">
               <CheckCircle size={20} />
-              <span>Audit started successfully! Redirecting...</span>
+              <span>{successMessage || 'Audit thành công! Redirecting...'}</span>
             </div>
           )}
 
