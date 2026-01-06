@@ -50,7 +50,7 @@ function AppRoutes() {
         <Route path="audits/:id" element={<AuditDetail />} />
         <Route path="audit/new" element={<AuditForm osType="linux" />} />
         <Route path="audit/new/windows" element={<AuditForm osType="windows" />} />
-        <Route path="remediations" element={<Remediationabcd />} />
+        <Route path="remediations" element={<Remediations />} />
         <Route path="remediate/new" element={<RemediationForm />} />
         <Route path="rollback" element={<Rollback />} />
         <Route path="backups" element={<Backups />} />
