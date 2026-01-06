@@ -77,7 +77,7 @@ export default function AuditForm({ osType = 'linux' }) {
       setAuditId(response.data.audit_id)
       setSuccessMessage('Audit thành công')
       setSuccess(true)
-      window.alert('Audit thành công')
+      window.alert('Audit thành công')  
       
       // Redirect to audit detail after 2 seconds
       setTimeout(() => {
@@ -306,6 +306,7 @@ function WindowsAuditForm() {
       })
 
       setSuccess(true)
+      window.alert('Audit thành công')
       setTimeout(() => {
         if (response.data.audit_id) {
           navigate(`/audits/${response.data.audit_id}`)
