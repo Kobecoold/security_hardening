@@ -136,7 +136,7 @@ export default function Remediations() {
   return (
     <div className="remediations-page">
       <div className="page-header">
-        <h1>Remediationabcd</h1>
+        <h1>Remediations</h1>
         <div className="header-actions">
           {(() => {
             const cleanRole = userRole ? String(userRole).trim().toLowerCase() : ''
