@@ -1472,7 +1472,7 @@ async def remediate_linux(
     Sudo_password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
     Rule_id: str = Form(..., description="ID của rule cần fix, ví dụ: cis-ubuntu-20.04-5.2.4"),
     create_backup: bool = Form(True),
-):
+): 
     """Chạy remediation script để fix rule FAIL - Tự động tạo backup - Lưu log vào MongoDB."""
     try:
         print(f"🔄 Starting Linux remediation for {Host} with rule: {Rule_id}")
@@ -1695,6 +1695,7 @@ async def get_audit_reports(
     Filter: có thể filter theo host và os_type
     """
     try:
+        total = db.count_audit_reports(host=host)
         audits = db.get_audit_reports(host=host, limit=limit)
         
         # Filter by OS type if provided
@@ -1707,7 +1708,7 @@ async def get_audit_reports(
             del audit["_id"]
             
         return {
-            "total": len(audits),
+            "total": total,
             "audits": audits
         }
     except Exception as e:
@@ -1725,6 +1726,7 @@ async def get_remediation_reports(
     Filter: có thể filter theo host
     """
     try:
+        total = db.count_remediation_logs(host=host)
         remediations = db.get_remediation_logs(host=host, limit=limit)
         
         for remediation in remediations:
@@ -1732,7 +1734,7 @@ async def get_remediation_reports(
             del remediation["_id"]
             
         return {
-            "total": len(remediations),
+            "total": total,
             "remediations": remediations
         }
     except Exception as e:

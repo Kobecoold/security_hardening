@@ -87,6 +87,14 @@ class AuditDB:
         
         return list(self.audits.find(query).sort("created_at", -1).limit(limit))
     
+    def count_audit_reports(self, host: Optional[str] = None) -> int:
+        """Đếm số audit reports"""
+        query = {}
+        if host:
+            query["host"] = host
+        
+        return self.audits.count_documents(query)
+    
     def get_remediation_logs(self, host: Optional[str] = None, limit: int = 50) -> List[Dict]:
         """Lấy danh sách remediation logs"""
         query = {}
@@ -94,6 +102,14 @@ class AuditDB:
             query["host"] = host
         
         return list(self.remediations.find(query).sort("created_at", -1).limit(limit))
+    
+    def count_remediation_logs(self, host: Optional[str] = None) -> int:
+        """Đếm số remediation logs"""
+        query = {}
+        if host:
+            query["host"] = host
+        
+        return self.remediations.count_documents(query)
     
     def get_hosts_overview(self) -> List[Dict]:
         """Lấy overview của tất cả hosts"""
