@@ -374,6 +374,8 @@ export default function RemediationForm() {
 
         setSuccessMessage('Remediation thành công')
         setSuccess(true)
+        // Hiển thị thông báo rõ ràng sau khi chạy xong
+        window.alert('Remediation thành công')
         setTimeout(() => {
           navigate('/remediations')
         }, 2000)
@@ -455,6 +457,8 @@ export default function RemediationForm() {
 
         setSuccessMessage('Remediation thành công')
         setSuccess(true)
+        // Hiển thị thông báo rõ ràng sau khi chạy xong
+        window.alert('Remediation thành công')
         setTimeout(() => {
           navigate('/remediations')
         }, 2000)
