@@ -19,6 +19,7 @@ export default function RemediationForm() {
   const [loadingRules, setLoadingRules] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
+  const [successMessage, setSuccessMessage] = useState('')
 
   // Get host and OS from location state (from audit detail page)
   const { host, osType, auditId } = location.state || {}
@@ -286,6 +287,7 @@ export default function RemediationForm() {
     e.preventDefault()
     setError('')
     setSuccess(false)
+    setSuccessMessage('')
     setLoading(true)
 
     try {
@@ -370,6 +372,7 @@ export default function RemediationForm() {
           }
         }
 
+        setSuccessMessage('Remediation thành công')
         setSuccess(true)
         setTimeout(() => {
           navigate('/remediations')
@@ -450,6 +453,7 @@ export default function RemediationForm() {
           }
         }
 
+        setSuccessMessage('Remediation thành công')
         setSuccess(true)
         setTimeout(() => {
           navigate('/remediations')
@@ -850,7 +854,7 @@ export default function RemediationForm() {
           {success && (
             <div className="success-banner">
               <CheckCircle size={20} />
-              <span>Remediation started successfully! Redirecting...</span>
+              <span>{successMessage || 'Remediation thành công! Redirecting...'}</span>
             </div>
           )}
 

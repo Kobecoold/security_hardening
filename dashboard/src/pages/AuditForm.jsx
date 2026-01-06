@@ -10,7 +10,7 @@ export default function AuditForm({ osType = 'linux' }) {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
   const [auditId, setAuditId] = useState(null)
-
+  const [successMessage, setSuccessMessage] = useState('')
   // Form state
   const [formData, setFormData] = useState({
     host: '',
@@ -54,6 +54,7 @@ export default function AuditForm({ osType = 'linux' }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    setSuccessMessage('')
     setError('')
     setSuccess(false)
     setLoading(true)
@@ -74,6 +75,7 @@ export default function AuditForm({ osType = 'linux' }) {
       })
 
       setAuditId(response.data.audit_id)
+      setSuccessMessage('Audit thành công')
       setSuccess(true)
       
       // Redirect to audit detail after 2 seconds
@@ -239,7 +241,7 @@ export default function AuditForm({ osType = 'linux' }) {
           {success && (
             <div className="success-banner">
               <CheckCircle size={20} />
-              <span>Audit started successfully! Redirecting...</span>
+              <span>{successMessage || 'Audit thành công! Redirecting...'}</span>
             </div>
           )}
 
