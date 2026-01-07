@@ -35,6 +35,15 @@ export default function Remediations() {
     }
   }
 
+  const formatVietnamTime = (value) => {
+    try {
+      return new Date(value).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })
+    } catch (e) {
+      console.warn('Invalid remediation date:', value, e)
+      return value || ''
+    }
+  }
+
   const getStatusIcon = (status) => {
     if (status === 'SUCCESS') {
       return <CheckCircle size={16} className="icon-success" />
@@ -247,7 +256,7 @@ export default function Remediations() {
                       {remediation.created_at && (
                         <>
                           <span>•</span>
-                          <span>{new Date(remediation.created_at).toLocaleString()}</span>
+                          <span>{formatVietnamTime(remediation.created_at)}</span>
                         </>
                       )}
                     </p>

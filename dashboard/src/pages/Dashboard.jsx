@@ -151,7 +151,7 @@ export default function Dashboard() {
           color="#8b5cf6"
         />
         <StatCard
-          title="Remediati"
+          title="Remediations"
           value={stats.totalRemediations}
           label="Remediation actions"
           icon={Wrench}
