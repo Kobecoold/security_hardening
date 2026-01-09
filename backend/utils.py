@@ -77,13 +77,14 @@ def load_rules_by_os(os_name: str) -> List[Dict]:
             file_path = os.path.join(root, entry)
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
-                    data = yaml.safe_load(f)
-                    if data is None:
-                        continue
-                    if isinstance(data, list):
-                        rules.extend(data)
-                    elif isinstance(data, dict):
-                        rules.append(data)
+                    # Hỗ trợ multi-document YAML (---)
+                    for doc in yaml.safe_load_all(f):
+                        if doc is None:
+                            continue
+                        if isinstance(doc, list):
+                            rules.extend(doc)
+                        elif isinstance(doc, dict):
+                            rules.append(doc)
             except Exception as exc:
                 # Bỏ qua file hỏng nhưng ghi chú lỗi trong kết quả gọi API cấp trên
                 from fastapi import HTTPException
