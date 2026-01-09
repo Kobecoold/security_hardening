@@ -964,6 +964,15 @@ export CONTAINER_NAME="{Container_name}"
                 sudo_password=Sudo_password_host,
                 timeout=120,
             )
+            # Debug: Print output để kiểm tra
+            print(f"📊 Script execution result:")
+            print(f"   Exit code: {exec_result.get('exit_status', -1)}")
+            print(f"   Stdout length: {len(exec_result.get('stdout', ''))}")
+            print(f"   Stderr length: {len(exec_result.get('stderr', ''))}")
+            if exec_result.get('stdout'):
+                print(f"   Stdout preview: {exec_result.get('stdout', '')[:200]}...")
+            if exec_result.get('stderr'):
+                print(f"   Stderr preview: {exec_result.get('stderr', '')[:200]}...")
         finally:
             try:
                 ssh_exec.close()
@@ -995,6 +1004,10 @@ export CONTAINER_NAME="{Container_name}"
 
         final_status = "SUCCESS" if exec_result.get("exit_status") == 0 else "PARTIAL"
 
+        # Truncate output cho response (không quá 10000 ký tự để tránh response quá lớn)
+        stdout_full = exec_result.get("stdout", "")
+        stderr_full = exec_result.get("stderr", "")
+        
         return {
             "remediation_id": remediation_id,
             "rule_id": Rule_id,
@@ -1002,8 +1015,8 @@ export CONTAINER_NAME="{Container_name}"
             "host": Host,
             "container": Container_name,
             "exit_code": exec_result.get("exit_status", -1),
-            "output": exec_result.get("stdout", "")[:1000],
-            "error": exec_result.get("stderr", "")[:1000],
+            "output": stdout_full[:10000],  # Tăng từ 1000 lên 10000
+            "error": stderr_full[:10000],    # Tăng từ 1000 lên 10000
             "message": f"Container remediation completed with exit code {exec_result.get('exit_status', -1)}",
             "rollback_available": False,
             "connection_verified": True,
