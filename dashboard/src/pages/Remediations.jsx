@@ -24,12 +24,20 @@ export default function Remediations() {
   const loadRemediations = async () => {
     try {
       setLoading(true)
-      const response = await api.get('/reports/remediations?limit=50')
-      setRemediations(response.data.remediations || [])
       setError(null)
+      console.log('Loading remediations...')
+      const response = await api.get('/reports/remediations?limit=50')
+      console.log('API Response:', response)
+      console.log('Response data:', response.data)
+      const remediationsList = response.data?.remediations || response.data || []
+      console.log('Remediations list:', remediationsList, 'Type:', typeof remediationsList, 'Is Array:', Array.isArray(remediationsList))
+      setRemediations(Array.isArray(remediationsList) ? remediationsList : [])
     } catch (err) {
       console.error('Error loading remediations:', err)
-      setError(err.response?.data?.detail || 'Failed to load remediations')
+      console.error('Error response:', err.response)
+      console.error('Error message:', err.message)
+      setError(err.response?.data?.detail || err.message || 'Failed to load remediations')
+      setRemediations([]) // Set empty array on error
     } finally {
       setLoading(false)
     }
@@ -188,9 +196,21 @@ export default function Remediations() {
       </div>
 
       {error && (
-        <div className="error-banner">
+        <div className="error-banner" style={{ padding: '20px', background: '#fee', border: '2px solid red', margin: '20px', borderRadius: '8px' }}>
           <AlertCircle size={20} />
-          <span>{error}</span>
+          <span style={{ marginLeft: '10px', fontWeight: 'bold' }}>Error: {error}</span>
+          <button onClick={loadRemediations} style={{ marginLeft: '20px', padding: '5px 10px', cursor: 'pointer' }}>
+            Retry
+          </button>
+        </div>
+      )}
+      
+      {!error && remediations.length === 0 && !loading && (
+        <div style={{ padding: '40px', textAlign: 'center', color: '#666' }}>
+          <p>No remediations found.</p>
+          <button onClick={loadRemediations} style={{ marginTop: '10px', padding: '8px 16px' }}>
+            Refresh
+          </button>
         </div>
       )}
 
@@ -218,20 +238,26 @@ export default function Remediations() {
             )}
           </div>
           <div className="remediations-container">
-            {remediations.map((remediation) => {
-              const remediationId = remediation.remediation_id || remediation._id || remediation.id
-              const isWindows = remediation.os_type && (
-                remediation.os_type.toLowerCase().includes('windows') || 
-                remediation.os_type.toLowerCase().includes('win')
-              )
-              const isExpanded = expandedIds.has(remediationId)
-              // Fallback: check cả script_output/script_error
-              const hasDetails = remediation.output || remediation.error || 
-                                 remediation.script_output || remediation.script_error || 
-                                 remediation.verification_passed !== undefined
-              
-              return (
-              <div key={remediationId} className="remediation-card">
+            {remediations.map((remediation, index) => {
+              try {
+                const remediationId = remediation?.remediation_id || remediation?._id || remediation?.id || `remediation-${index}`
+                if (!remediationId) {
+                  console.warn('Remediation without ID:', remediation)
+                  return null
+                }
+                
+                const isWindows = remediation?.os_type && (
+                  remediation.os_type.toLowerCase().includes('windows') || 
+                  remediation.os_type.toLowerCase().includes('win')
+                )
+                const isExpanded = expandedIds.has(remediationId)
+                // Fallback: check cả script_output/script_error
+                const hasDetails = remediation?.output || remediation?.error || 
+                                   remediation?.script_output || remediation?.script_error || 
+                                   remediation?.verification_passed !== undefined
+                
+                return (
+                <div key={remediationId} className="remediation-card">
                 {userRole && String(userRole).trim().toLowerCase() === 'admin' && (
                   <div className="remediation-checkbox">
                     <input
@@ -274,18 +300,18 @@ export default function Remediations() {
 
               {/* Summary section - always visible */}
               <div className="remediation-details">
-                {remediation.backup_id && (
+                {remediation?.backup_id && (
                   <div className="detail-item">
                     <strong>Backup ID:</strong> {remediation.backup_id}
                   </div>
                 )}
-                {remediation.exit_code !== undefined && (
+                {remediation?.exit_code !== undefined && (
                   <div className="detail-item">
                     <strong>Exit Code:</strong> {remediation.exit_code}
                   </div>
                 )}
                 {/* Linux: Show verification in summary, Windows: Show in details */}
-                {!isWindows && remediation.verification_passed !== undefined && (
+                {!isWindows && remediation?.verification_passed !== undefined && (
                   <div className="detail-item">
                     <strong>Verification:</strong>{' '}
                     {remediation.verification_passed ? (
@@ -295,7 +321,7 @@ export default function Remediations() {
                     )}
                   </div>
                 )}
-              {remediation.rollback_status && remediation.rollback_status === 'AVAILABLE' && remediation.backup_id && (
+              {remediation?.rollback_status && remediation.rollback_status === 'AVAILABLE' && remediation?.backup_id && (
                 <div className="detail-item">
                   <strong>Rule Backup:</strong>{' '}
                   <span className="rollback-available">Available</span>
@@ -404,13 +430,31 @@ export default function Remediations() {
                 </>
               )}
 
-              {remediation.message && (
+              {remediation?.message && (
                 <div className="remediation-message">
                   {remediation.message}
                 </div>
               )}
             </div>
-            )
+                )
+              } catch (err) {
+                console.error('Error rendering remediation card:', err, remediation)
+                return (
+                  <div key={`error-${index}`} className="remediation-card" style={{ border: '2px solid red' }}>
+                    <div className="remediation-header">
+                      <div className="remediation-title">
+                        <AlertCircle size={16} className="icon-partial" />
+                        <div>
+                          <h3>Error rendering remediation</h3>
+                          <p className="remediation-meta">
+                            <span>Error: {err.message}</span>
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              }
             })}
           </div>
         </>
