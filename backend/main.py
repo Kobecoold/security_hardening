@@ -965,14 +965,20 @@ export CONTAINER_NAME="{Container_name}"
                 timeout=120,
             )
             # Debug: Print output để kiểm tra
+            stdout_raw = exec_result.get('stdout', '') or ''
+            stderr_raw = exec_result.get('stderr', '') or ''
             print(f"📊 Script execution result:")
             print(f"   Exit code: {exec_result.get('exit_status', -1)}")
-            print(f"   Stdout length: {len(exec_result.get('stdout', ''))}")
-            print(f"   Stderr length: {len(exec_result.get('stderr', ''))}")
-            if exec_result.get('stdout'):
-                print(f"   Stdout preview: {exec_result.get('stdout', '')[:200]}...")
-            if exec_result.get('stderr'):
-                print(f"   Stderr preview: {exec_result.get('stderr', '')[:200]}...")
+            print(f"   Stdout length: {len(stdout_raw)}")
+            print(f"   Stderr length: {len(stderr_raw)}")
+            if stdout_raw:
+                print(f"   Stdout preview (first 500 chars):\n{stdout_raw[:500]}")
+            else:
+                print(f"   ⚠️ WARNING: Stdout is EMPTY!")
+            if stderr_raw:
+                print(f"   Stderr preview (first 500 chars):\n{stderr_raw[:500]}")
+            else:
+                print(f"   ℹ️ Stderr is empty (normal if no errors)")
         finally:
             try:
                 ssh_exec.close()
@@ -980,6 +986,10 @@ export CONTAINER_NAME="{Container_name}"
                 pass
 
         # Lưu log remediation
+        # truncate_output trả về dict với "text" và "truncated", cần extract text
+        stdout_truncated = truncate_output(exec_result.get("stdout", ""))
+        stderr_truncated = truncate_output(exec_result.get("stderr", ""))
+        
         remediation_data = {
             "host": Host,
             "container": Container_name,
@@ -987,8 +997,10 @@ export CONTAINER_NAME="{Container_name}"
             "client_type": "container",
             "protocol": "docker-exec",
             "rule_id": Rule_id,
-            "script_output": truncate_output(exec_result.get("stdout", "")),
-            "script_error": truncate_output(exec_result.get("stderr", "")),
+            "script_output": stdout_truncated.get("text", ""),  # Extract text từ dict
+            "script_error": stderr_truncated.get("text", ""),  # Extract text từ dict
+            "output": stdout_truncated.get("text", ""),  # Thêm field "output" cho dashboard
+            "error": stderr_truncated.get("text", ""),   # Thêm field "error" cho dashboard
             "exit_code": exec_result.get("exit_status", -1),
             "backup_id": None,
             "connection_verified": True,

@@ -225,7 +225,10 @@ export default function Remediations() {
                 remediation.os_type.toLowerCase().includes('win')
               )
               const isExpanded = expandedIds.has(remediationId)
-              const hasDetails = remediation.output || remediation.error || remediation.verification_passed !== undefined
+              // Fallback: check cả script_output/script_error
+              const hasDetails = remediation.output || remediation.error || 
+                                 remediation.script_output || remediation.script_error || 
+                                 remediation.verification_passed !== undefined
               
               return (
               <div key={remediationId} className="remediation-card">
@@ -383,17 +386,19 @@ export default function Remediations() {
                   )}
 
                   {/* Output and Error - only in details section */}
-                  {remediation.output && (
+                  {/* Fallback: đọc từ script_output nếu output không có */}
+                  {(remediation.output || remediation.script_output) && (
                     <div className="remediation-output">
                       <strong>Output:</strong>
-                      <pre>{remediation.output}</pre>
+                      <pre>{remediation.output || remediation.script_output || ''}</pre>
                     </div>
                   )}
 
-                  {remediation.error && (
+                  {/* Fallback: đọc từ script_error nếu error không có */}
+                  {(remediation.error || remediation.script_error) && (
                     <div className="remediation-output error">
                       <strong>Error:</strong>
-                      <pre>{remediation.error}</pre>
+                      <pre>{remediation.error || remediation.script_error || ''}</pre>
                     </div>
                   )}
                 </>
