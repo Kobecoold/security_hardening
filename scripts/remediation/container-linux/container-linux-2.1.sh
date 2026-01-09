@@ -17,7 +17,29 @@ if ! docker inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
     exit 1
 fi
 
-# Chỉ log cấu hình và hướng dẫn, KHÔNG auto chạy docker run
+# === LẤY THÔNG TIN CONTAINER CŨ ===
+CONTAINER_IMAGE=$(docker inspect "$CONTAINER_NAME" --format '{{.Config.Image}}')
+PORTS=$(docker port "$CONTAINER_NAME" | awk '{printf "-p %s ", $1}')
+ENVS=$(docker inspect "$CONTAINER_NAME" --format '{{range .Config.Env}}{{printf "-e \"%s\" " .}}{{end}}')
+VOLUMES=$(docker inspect "$CONTAINER_NAME" --format '{{range .Mounts}}{{printf "-v %s:%s " .Source .Destination}}{{end}}')
+
+# === XÓA CONTAINER CŨ ===
+echo "> Dừng & xoá container cũ..."
+docker stop "$CONTAINER_NAME"
+docker rm "$CONTAINER_NAME"
+
+# === RUN LAI KHÔNG privileged ===
+echo "> Tạo lại container không --privileged..."
+docker run -d --name "$CONTAINER_NAME" $PORTS $ENVS $VOLUMES $CONTAINER_IMAGE
+
+if [ $? -eq 0 ]; then
+  echo "✅ Đã tạo lại container không có đặc quyền (no privileged)."
+  exit 0
+else
+  echo "❌ Lỗi khi tạo lại container."
+  exit 1
+fi
+
 CONTAINER_IMAGE=$(docker inspect "$CONTAINER_NAME" --format '{{.Config.Image}}' 2>/dev/null || echo "")
 
 echo ""
