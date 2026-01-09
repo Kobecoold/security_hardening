@@ -3,8 +3,9 @@
 # Script chạy trên HOST (không phải trong container)
 set -euo pipefail
 
-# Force output to stdout (không buffer)
-exec >&1
+# Force output to stdout và stderr (không buffer)
+# Đảm bảo tất cả output đều được gửi ra stdout/stderr
+exec >&1 2>&1
 
 CONTAINER_NAME="${CONTAINER_NAME:-}"
 if [ -z "$CONTAINER_NAME" ]; then

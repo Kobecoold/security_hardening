@@ -986,9 +986,18 @@ export CONTAINER_NAME="{Container_name}"
                 pass
 
         # Lưu log remediation
-        # truncate_output trả về dict với "text" và "truncated", cần extract text
-        stdout_truncated = truncate_output(exec_result.get("stdout", ""))
-        stderr_truncated = truncate_output(exec_result.get("stderr", ""))
+        # Lấy stdout/stderr trực tiếp (không truncate trong database)
+        stdout_text = stdout_raw.strip() if stdout_raw else ""
+        stderr_text = stderr_raw.strip() if stderr_raw else ""
+        
+        # Debug: Kiểm tra output trước khi lưu
+        print(f"💾 Preparing to save remediation log:")
+        print(f"   Output length: {len(stdout_text)}")
+        print(f"   Error length: {len(stderr_text)}")
+        if stdout_text:
+            print(f"   Output preview: {stdout_text[:200]}...")
+        else:
+            print(f"   ⚠️ WARNING: Output is EMPTY - script may not have produced any output!")
         
         remediation_data = {
             "host": Host,
@@ -997,21 +1006,33 @@ export CONTAINER_NAME="{Container_name}"
             "client_type": "container",
             "protocol": "docker-exec",
             "rule_id": Rule_id,
-            "script_output": stdout_truncated.get("text", ""),  # Extract text từ dict
-            "script_error": stderr_truncated.get("text", ""),  # Extract text từ dict
-            "output": stdout_truncated.get("text", ""),  # Thêm field "output" cho dashboard
-            "error": stderr_truncated.get("text", ""),   # Thêm field "error" cho dashboard
+            "script_output": stdout_text,  # Lưu full text
+            "script_error": stderr_text,   # Lưu full text
+            "output": stdout_text,  # Field "output" cho dashboard
+            "error": stderr_text,   # Field "error" cho dashboard
             "exit_code": exec_result.get("exit_status", -1),
             "backup_id": None,
             "connection_verified": True,
             "script_executed": True,
+            "status": "SUCCESS" if exec_result.get("exit_status") == 0 else "PARTIAL",
         }
 
         try:
             remediation_id = db.save_remediation_log(remediation_data)
             print(f"✅ Container remediation log saved: {remediation_id}")
+            # Debug: Kiểm tra lại data đã lưu
+            saved = db.get_remediation_logs(host=Host, limit=1)
+            if saved:
+                saved_output = saved[0].get("output", "") or saved[0].get("script_output", "")
+                print(f"🔍 Verification: Saved output length = {len(saved_output)}")
+                if saved_output:
+                    print(f"   First 200 chars: {saved_output[:200]}")
+                else:
+                    print(f"   ⚠️ WARNING: Saved output is EMPTY!")
         except Exception as db_error:
             print(f"⚠️ MongoDB save failed: {db_error}")
+            import traceback
+            traceback.print_exc()
             remediation_id = None
 
         final_status = "SUCCESS" if exec_result.get("exit_status") == 0 else "PARTIAL"
