@@ -29,3 +29,124 @@ check:
     mount | awk '$3=="/tmp"{print $0}' | grep -q "nodev"  || { echo "/tmp missing nodev";  exit 1; }
     echo "/tmp has noexec,nosuid,nodev"
     exit 0
+
+---
+id: container-linux-2.1
+os: container-linux
+title: Ensure container is not running in privileged mode
+benchmark: Container Baseline
+level: 1
+description: Privileged containers have access to all devices and can escape container isolation.
+needs_sudo: false
+check:
+  bash: |
+    # Check if running in privileged mode by checking /proc/self/status for CapEff
+    # Privileged containers have all capabilities (CapEff: 0000003fffffffff or similar)
+    if [ -f /proc/self/status ]; then
+      CAPEFF=$(grep "^CapEff:" /proc/self/status | awk '{print $2}')
+      # If CapEff is all 1s or very high, likely privileged
+      if echo "$CAPEFF" | grep -qE "^0000003fffffffff$|^0000001fffffffff$|^ffffffffffffffff$"; then
+        echo "Container is running in privileged mode (CapEff: $CAPEFF)"
+        exit 1
+      fi
+      echo "Container is not running in privileged mode (CapEff: $CAPEFF)"
+      exit 0
+    else
+      echo "Cannot check privileged mode: /proc/self/status not accessible"
+      exit 1
+    fi
+
+---
+id: container-linux-2.2
+os: container-linux
+title: Ensure container does not have dangerous capabilities (SYS_ADMIN, NET_ADMIN)
+benchmark: Container Baseline
+level: 1
+description: Dangerous capabilities like SYS_ADMIN and NET_ADMIN can be used to escape container isolation.
+needs_sudo: false
+check:
+  bash: |
+    # Check capabilities using capsh (if available) or /proc/self/status
+    if command -v capsh >/dev/null 2>&1; then
+      CAPS=$(capsh --print 2>/dev/null | grep "Current:" | awk -F'=' '{print $2}')
+      if echo "$CAPS" | grep -qE "cap_sys_admin|cap_net_admin"; then
+        echo "Container has dangerous capabilities: $CAPS"
+        exit 1
+      fi
+      echo "Container does not have dangerous capabilities"
+      exit 0
+    elif [ -f /proc/self/status ]; then
+      # Fallback: check if we can mount (requires SYS_ADMIN)
+      if mount -t tmpfs tmpfs /tmp/test_mount 2>/dev/null; then
+        umount /tmp/test_mount 2>/dev/null
+        echo "Container likely has SYS_ADMIN capability (can mount filesystems)"
+        exit 1
+      fi
+      echo "Container does not appear to have SYS_ADMIN"
+      exit 0
+    else
+      echo "Cannot check capabilities: capsh not available and /proc/self/status not accessible"
+      exit 1
+    fi
+
+---
+id: container-linux-2.3
+os: container-linux
+title: Ensure container root filesystem is read-only
+benchmark: Container Baseline
+level: 1
+description: Read-only root filesystem prevents unauthorized modifications to container filesystem.
+needs_sudo: false
+check:
+  bash: |
+    # Try to create a test file in root to check if read-only
+    if touch /test_readonly_check 2>/dev/null; then
+      rm -f /test_readonly_check 2>/dev/null
+      echo "Container root filesystem is NOT read-only (writable)"
+      exit 1
+    else
+      echo "Container root filesystem is read-only"
+      exit 0
+    fi
+
+---
+id: container-linux-2.4
+os: container-linux
+title: Ensure container does not mount /var/run/docker.sock
+benchmark: Container Baseline
+level: 1
+description: Mounting docker.sock gives container access to Docker daemon, allowing container escape.
+needs_sudo: false
+check:
+  bash: |
+    if mount | grep -q "/var/run/docker.sock"; then
+      echo "Container has /var/run/docker.sock mounted (security risk)"
+      exit 1
+    fi
+    echo "Container does not mount /var/run/docker.sock"
+    exit 0
+
+---
+id: container-linux-2.5
+os: container-linux
+title: Ensure container has no-new-privileges security option enabled
+benchmark: Container Baseline
+level: 1
+description: no-new-privileges prevents processes from gaining additional privileges via setuid/setgid.
+needs_sudo: false
+check:
+  bash: |
+    # Check /proc/self/status for NoNewPrivs
+    if [ -f /proc/self/status ]; then
+      NONEWPRIVS=$(grep "^NoNewPrivs:" /proc/self/status | awk '{print $2}')
+      if [ "$NONEWPRIVS" = "1" ]; then
+        echo "Container has no-new-privileges enabled"
+        exit 0
+      else
+        echo "Container does NOT have no-new-privileges enabled (NoNewPrivs: $NONEWPRIVS)"
+        exit 1
+      fi
+    else
+      echo "Cannot check no-new-privileges: /proc/self/status not accessible"
+      exit 1
+    fi
