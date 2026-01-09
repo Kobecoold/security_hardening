@@ -62,6 +62,10 @@ export default function Audits() {
                 <Plus size={18} />
                 New Windows Audit
               </button>
+              <button onClick={() => navigate('/audit/new/container')} className="btn-new-audit container">
+                <Plus size={18} />
+                New Container Audit
+              </button>
             </>
           )}
           <button onClick={loadAudits} className="refresh-btn">

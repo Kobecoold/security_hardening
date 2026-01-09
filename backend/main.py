@@ -878,6 +878,138 @@ async def audit_container_docker_exec(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=error_msg)
 
+@app.post("/remediate/container", dependencies=[RequireAdmin])
+async def remediate_container(
+    Host: str = Form(...),
+    Username: str = Form(""),
+    Container_name: str = Form(...),
+    Key_path: Optional[str] = Form("~/.ssh/id_ed25519"),
+    Password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+    Use_sudo_host: bool = Form(False),
+    Sudo_password_host: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+    Rule_id: str = Form(..., description="ID của rule container cần fix"),
+):
+    """
+    Chạy remediation script cho container (docker exec) dựa trên rule_id.
+    Scripts được lấy từ scripts/remediation/container-linux/.
+    """
+    try:
+        if not Host or not Host.strip():
+            raise HTTPException(status_code=400, detail="Host is required")
+        if not Username or not Username.strip():
+            raise HTTPException(status_code=400, detail="Username is required. Please provide a valid username (not empty).")
+        if not Container_name or not Container_name.strip():
+            raise HTTPException(status_code=400, detail="Container_name is required")
+        if not Rule_id or not Rule_id.strip():
+            raise HTTPException(status_code=400, detail="Rule_id is required")
+
+        Host = Host.strip()
+        Username = Username.strip()
+        Container_name = Container_name.strip()
+        Rule_id = Rule_id.strip()
+
+        name_pattern = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
+        if not name_pattern.match(Container_name):
+            raise HTTPException(status_code=400, detail="Invalid container name. Only letters, numbers, . _ - are allowed.")
+
+        print(f"🔄 Starting container remediation for {Host}/{Container_name} with rule: {Rule_id}")
+
+        # Kiểm tra container tồn tại
+        ssh = ssh_connect(Host, Username, Key_path or "", password=Password)
+        try:
+            check_cmd = f"docker inspect {Container_name} >/dev/null 2>&1"
+            exists = run_bash_check_stdin(
+                ssh,
+                check_cmd,
+                use_sudo=Use_sudo_host,
+                sudo_password=Sudo_password_host,
+                timeout=15,
+            )
+            if exists.get("exit_status") != 0:
+                raise HTTPException(status_code=400, detail=f"Container '{Container_name}' not found on host {Host}")
+        finally:
+            try:
+                ssh.close()
+            except Exception:
+                pass
+
+        # Load remediation script từ scripts/remediation/container-linux/
+        print(f"📄 Loading container remediation script for rule: {Rule_id}")
+        script_content = load_remediation_script("container-linux", Rule_id)
+        if not script_content:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Không tìm thấy remediation script cho rule: {Rule_id} trong scripts/remediation/container-linux/",
+            )
+
+        print(f"✅ Script loaded ({len(script_content)} bytes)")
+
+        docker_script = f"docker exec -i {Container_name} sh <<'EOF'\n{script_content}\nEOF\n"
+
+        # Thực thi script (timeout 2 phút)
+        print(f"🚀 Executing remediation script on container {Container_name}...")
+        ssh_exec = ssh_connect(Host, Username, Key_path or "", password=Password)
+        try:
+            exec_result = run_bash_check_stdin(
+                ssh_exec,
+                docker_script,
+                use_sudo=Use_sudo_host,
+                sudo_password=Sudo_password_host,
+                timeout=120,
+            )
+        finally:
+            try:
+                ssh_exec.close()
+            except Exception:
+                pass
+
+        # Lưu log remediation
+        remediation_data = {
+            "host": Host,
+            "container": Container_name,
+            "os_type": "container-linux",
+            "client_type": "container",
+            "protocol": "docker-exec",
+            "rule_id": Rule_id,
+            "script_output": truncate_output(exec_result.get("stdout", "")),
+            "script_error": truncate_output(exec_result.get("stderr", "")),
+            "exit_code": exec_result.get("exit_status", -1),
+            "backup_id": None,
+            "connection_verified": True,
+            "script_executed": True,
+        }
+
+        try:
+            remediation_id = db.save_remediation_log(remediation_data)
+            print(f"✅ Container remediation log saved: {remediation_id}")
+        except Exception as db_error:
+            print(f"⚠️ MongoDB save failed: {db_error}")
+            remediation_id = None
+
+        final_status = "SUCCESS" if exec_result.get("exit_status") == 0 else "PARTIAL"
+
+        return {
+            "remediation_id": remediation_id,
+            "rule_id": Rule_id,
+            "status": final_status,
+            "host": Host,
+            "container": Container_name,
+            "exit_code": exec_result.get("exit_status", -1),
+            "output": exec_result.get("stdout", "")[:1000],
+            "error": exec_result.get("stderr", "")[:1000],
+            "message": f"Container remediation completed with exit code {exec_result.get('exit_status', -1)}",
+            "rollback_available": False,
+            "connection_verified": True,
+            "script_executed": True,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Container remediation failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/healthz")
 async def healthz():
     """Health check endpoint."""

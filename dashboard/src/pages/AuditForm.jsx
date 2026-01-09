@@ -124,6 +124,9 @@ export default function AuditForm({ osType = 'linux' }) {
   if (osType === 'windows') {
     return <WindowsAuditForm />
   }
+  if (osType === 'container') {
+    return <ContainerAuditForm />
+  }
 
   return (
     <div className="audit-form-page">
@@ -421,3 +424,214 @@ function WindowsAuditForm() {
   )
 }
 
+function ContainerAuditForm() {
+  const navigate = useNavigate()
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState(false)
+  const [successMessage, setSuccessMessage] = useState('')
+
+  const [formData, setFormData] = useState({
+    host: '',
+    username: '',
+    password: '',
+    container_name: '',
+    use_sudo_host: false,
+    sudo_password_host: ''
+  })
+
+  const handleChange = (e) => {
+    const { name, value, type, checked } = e.target
+    setFormData(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }))
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setError('')
+    setSuccess(false)
+    setSuccessMessage('')
+    setLoading(true)
+
+    try {
+      if (!formData.host || !formData.username || !formData.container_name) {
+        setError('Host, Username và Container name là bắt buộc')
+        setLoading(false)
+        return
+      }
+      if (!formData.password) {
+        setError('Password SSH cho host là bắt buộc (đơn giản hóa, không dùng key ở đây)')
+        setLoading(false)
+        return
+      }
+
+      const formDataToSend = new FormData()
+      formDataToSend.append('Host', formData.host.trim())
+      formDataToSend.append('Username', formData.username.trim())
+      formDataToSend.append('Password', formData.password)
+      formDataToSend.append('Container_name', formData.container_name.trim())
+      formDataToSend.append('Use_sudo_host', formData.use_sudo_host)
+      if (formData.sudo_password_host) {
+        formDataToSend.append('Sudo_password_host', formData.sudo_password_host)
+      }
+
+      const response = await api.post('/audit/container', formDataToSend, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+
+      setSuccessMessage('Container audit thành công')
+      setSuccess(true)
+      window.alert('Container audit thành công')
+
+      setTimeout(() => {
+        if (response.data.audit_id) {
+          navigate(`/audits/${response.data.audit_id}`)
+        } else {
+          navigate('/audits')
+        }
+      }, 2000)
+    } catch (err) {
+      console.error('Container audit error:', err)
+      setError(err.response?.data?.detail || err.message || 'Failed to run container audit')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="audit-form-page">
+      <div className="page-header">
+        <h1>Run Container Audit</h1>
+        <button onClick={() => navigate('/audits')} className="back-btn">
+          ← Back to Audits
+        </button>
+      </div>
+
+      <div className="audit-form-container">
+        <form onSubmit={handleSubmit} className="audit-form">
+          <div className="form-section">
+            <h2>Host (Docker) Connection</h2>
+
+            <div className="form-group">
+              <label htmlFor="host">Host *</label>
+              <input
+                id="host"
+                name="host"
+                type="text"
+                value={formData.host}
+                onChange={handleChange}
+                placeholder="Docker host (ví dụ 10.0.101.219)"
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="username">Username *</label>
+              <input
+                id="username"
+                name="username"
+                type="text"
+                value={formData.username}
+                onChange={handleChange}
+                placeholder="user SSH trên host (ví dụ client)"
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="password">SSH Password *</label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                value={formData.password}
+                onChange={handleChange}
+                placeholder="Password SSH cho host"
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="container_name">Container Name *</label>
+              <input
+                id="container_name"
+                name="container_name"
+                type="text"
+                value={formData.container_name}
+                onChange={handleChange}
+                placeholder="Tên container (ví dụ demo-app)"
+                required
+              />
+            </div>
+          </div>
+
+          <div className="form-section">
+            <h2>Host Privileges</h2>
+
+            <div className="form-group checkbox-group">
+              <label>
+                <input
+                  type="checkbox"
+                  name="use_sudo_host"
+                  checked={formData.use_sudo_host}
+                  onChange={handleChange}
+                />
+                Use sudo trên host để chạy docker (nếu user không thuộc group docker)
+              </label>
+            </div>
+
+            {formData.use_sudo_host && (
+              <div className="form-group">
+                <label htmlFor="sudo_password_host">Sudo Password *</label>
+                <input
+                  id="sudo_password_host"
+                  name="sudo_password_host"
+                  type="password"
+                  value={formData.sudo_password_host}
+                  onChange={handleChange}
+                  placeholder="Sudo password cho host"
+                  required={formData.use_sudo_host}
+                />
+              </div>
+            )}
+          </div>
+
+          {error && (
+            <div className="error-banner">
+              <AlertCircle size={20} />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {success && (
+            <div className="success-banner">
+              <CheckCircle size={20} />
+              <span>{successMessage || 'Audit thành công! Redirecting...'}</span>
+            </div>
+          )}
+
+          <div className="form-actions">
+            <button type="button" onClick={() => navigate('/audits')} className="btn-secondary">
+              Cancel
+            </button>
+            <button type="submit" disabled={loading} className="btn-primary">
+              {loading ? (
+                <>
+                  <Loader size={18} className="spinner" />
+                  Running Audit...
+                </>
+              ) : (
+                <>
+                  <Server size={18} />
+                  Start Audit
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}

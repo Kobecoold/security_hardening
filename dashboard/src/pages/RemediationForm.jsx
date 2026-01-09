@@ -33,14 +33,15 @@ export default function RemediationForm() {
     password: '',
     use_sudo: true,
     sudo_password: '',
-    create_backup: true
+    create_backup: true,
+    container_name: '' // dùng cho container remediation
   })
 
   const [availableRules, setAvailableRules] = useState([])
   const [failedRules, setFailedRules] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
 
-  // Helper function to check if a rule ID belongs to Linux or Windows
+  // Helper function to check if a rule ID belongs to Linux, Windows, hoặc Container
   const isRuleForOS = (ruleId, osType) => {
     if (!ruleId || !osType) return true // If no info, show all (fallback)
     
@@ -52,14 +53,19 @@ export default function RemediationForm() {
     
     // Linux rules have prefix "cis-ubuntu", "cis-debian", or just "cis-" (but not winrm)
     const isLinuxRule = ruleIdLower.startsWith('cis-') && !isWindowsRule
+
+    // Container rules có prefix "container-"
+    const isContainerRule = ruleIdLower.startsWith('container-')
     
     // Check OS type
     const isWindowsOS = osTypeLower.startsWith('windows')
     const isLinuxOS = osTypeLower.startsWith('ubuntu') || osTypeLower.startsWith('debian')
+    const isContainerOS = osTypeLower.startsWith('container-')
     
     // Match rule to OS
     if (isWindowsOS && isWindowsRule) return true
     if (isLinuxOS && isLinuxRule) return true
+    if (isContainerOS && isContainerRule) return true
     
     // If OS type doesn't match rule type, filter it out
     return false
@@ -127,7 +133,8 @@ export default function RemediationForm() {
       setFormData(prev => ({
         ...prev,
         host: audit.host || prev.host,
-        os_type: audit.os_type || prev.os_type  // Always use OS type from audit if available
+        os_type: audit.os_type || prev.os_type,  // Always use OS type from audit if available
+        container_name: audit.container || prev.container_name || ''
       }))
     } catch (err) {
       console.error('Error loading audit:', err)
@@ -297,7 +304,9 @@ export default function RemediationForm() {
         return
       }
 
-      if (formData.os_type.startsWith('ubuntu') || formData.os_type.startsWith('debian')) {
+      const osTypeLower = (formData.os_type || '').toLowerCase()
+
+      if (osTypeLower.startsWith('ubuntu') || osTypeLower.startsWith('debian')) {
         // Linux remediation - run for each selected rule
         const validRuleIds = formData.rule_ids.filter(id => id && id.trim() !== '')
         
@@ -376,6 +385,58 @@ export default function RemediationForm() {
         setSuccess(true)
         // Hiển thị thông báo rõ ràng sau khi chạy xong
         window.alert('Remediation thành công')
+        setTimeout(() => {
+          navigate('/remediations')
+        }, 2000)
+      } else if (osTypeLower.startsWith('container-')) {
+        // Container remediation - dùng /remediate/container, 1 rule/lần (giống Linux nhưng qua docker exec)
+        const validRuleIds = formData.rule_ids.filter(id => id && id.trim() !== '')
+
+        if (validRuleIds.length === 0) {
+          setError('Please select at least one valid container rule to fix')
+          setLoading(false)
+          return
+        }
+
+        if (!formData.container_name || !formData.container_name.trim()) {
+          setError('Container name is required for container remediation')
+          setLoading(false)
+          return
+        }
+
+        const results = []
+        for (let i = 0; i < validRuleIds.length; i++) {
+          const ruleId = validRuleIds[i]
+          if (!ruleId || ruleId.trim() === '') continue
+
+          const formDataToSend = new FormData()
+          formDataToSend.append('Host', formData.host)
+          formDataToSend.append('Username', formData.username)
+          if (formData.key_path) formDataToSend.append('Key_path', formData.key_path)
+          if (formData.password) formDataToSend.append('Password', formData.password)
+          formDataToSend.append('Use_sudo_host', formData.use_sudo)
+          if (formData.sudo_password) formDataToSend.append('Sudo_password_host', formData.sudo_password)
+          formDataToSend.append('Container_name', formData.container_name.trim())
+          formDataToSend.append('Rule_id', ruleId.trim())
+
+          try {
+            const response = await api.post('/remediate/container', formDataToSend, {
+              headers: { 'Content-Type': 'multipart/form-data' }
+            })
+            results.push(response.data)
+          } catch (err) {
+            console.error(`Error remediating container rule ${ruleId}:`, err)
+            results.push({
+              rule_id: ruleId,
+              status: 'FAILED',
+              error: err.response?.data?.detail || err.message
+            })
+          }
+        }
+
+        setSuccessMessage('Container remediation hoàn tất (xem logs để biết chi tiết)')
+        setSuccess(true)
+        window.alert('Container remediation hoàn tất')
         setTimeout(() => {
           navigate('/remediations')
         }, 2000)
@@ -473,6 +534,7 @@ export default function RemediationForm() {
 
   const isLinux = formData.os_type?.startsWith('ubuntu') || 
                   formData.os_type?.startsWith('debian')
+  const isContainer = formData.os_type?.startsWith('container-')
 
   return (
     <div className="remediation-form-page">
@@ -486,7 +548,7 @@ export default function RemediationForm() {
       <div className="remediation-form-container">
         <form onSubmit={handleSubmit} className="remediation-form">
           <div className="form-section">
-            <h2>Target Host</h2>
+            <h2>Target Host / Container</h2>
             
             <div className="form-group">
               <label htmlFor="host">Host *</label>
@@ -500,6 +562,21 @@ export default function RemediationForm() {
                 required
               />
             </div>
+
+            {isContainer && (
+              <div className="form-group">
+                <label htmlFor="container_name">Container Name *</label>
+                <input
+                  id="container_name"
+                  name="container_name"
+                  type="text"
+                  value={formData.container_name}
+                  onChange={handleChange}
+                  placeholder="Tên container (ví dụ demo-app)"
+                  required={isContainer}
+                />
+              </div>
+            )}
 
             <div className="form-group">
               <label htmlFor="os_type">OS Type *</label>
@@ -516,6 +593,7 @@ export default function RemediationForm() {
                 <option value="debian-12">Debian 12</option>
                 <option value="windows-10">Windows 10</option>
                 <option value="windows-11">Windows 11</option>
+                <option value="container-linux">Container (Linux host)</option>
               </select>
             </div>
           </div>
