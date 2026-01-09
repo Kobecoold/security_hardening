@@ -2167,11 +2167,36 @@ async def get_remediation_reports(
             # Đảm bảo có các field cần thiết
             if "remediation_id" not in remediation and "id" in remediation:
                 remediation["remediation_id"] = remediation["id"]
+            
+            # FIX: Đảm bảo output/error là STRING, không phải dict
+            # Nếu là dict (từ truncate_output), extract text
+            def extract_text(value):
+                """Extract text từ value - có thể là string hoặc dict {text, truncated}"""
+                if value is None:
+                    return ""
+                if isinstance(value, str):
+                    return value
+                if isinstance(value, dict):
+                    # Nếu là dict từ truncate_output, lấy text
+                    return value.get("text", "") if "text" in value else str(value)
+                return str(value)
+            
+            # Xử lý script_output và script_error trước
+            if "script_output" in remediation:
+                remediation["script_output"] = extract_text(remediation["script_output"])
+            if "script_error" in remediation:
+                remediation["script_error"] = extract_text(remediation["script_error"])
+            
             # Đảm bảo output và error fields tồn tại (fallback từ script_output/script_error)
-            if "output" not in remediation and "script_output" in remediation:
-                remediation["output"] = remediation["script_output"]
-            if "error" not in remediation and "script_error" in remediation:
-                remediation["error"] = remediation["script_error"]
+            if "output" not in remediation:
+                remediation["output"] = extract_text(remediation.get("script_output", ""))
+            else:
+                remediation["output"] = extract_text(remediation["output"])
+                
+            if "error" not in remediation:
+                remediation["error"] = extract_text(remediation.get("script_error", ""))
+            else:
+                remediation["error"] = extract_text(remediation["error"])
         
         print(f"📊 GET /reports/remediations - Returning {len(remediations)} remediations (total: {total})")
         
