@@ -21,7 +21,7 @@ fi
 CONTAINER_IMAGE=$(docker inspect "$CONTAINER_NAME" --format '{{.Config.Image}}')
 PORTS=$(docker port "$CONTAINER_NAME" | awk '{printf "-p %s ", $1}')
 ENVS=$(docker inspect "$CONTAINER_NAME" --format '{{range .Config.Env}}{{printf "-e \"%s\" " .}}{{end}}')
-VOLUMES=$(docker inspect "$CONTAINER_NAME" --format '{{range .Mounts}}{{printf "-v %s:%s " .Source .Destination}}{{end}}')
+VOLUMES=$(docker inspect "$CONTAINER_NAME" --format '{{range .Mounts}}{{if and (ne .Destination "/tmp") (ne .Destination "/var/cache/nginx") (ne .Destination "/var/run") (ne .Destination "/var/log/nginx")}}{{printf "-v %s:%s " .Source .Destination}}{{end}}{{end}}')
 
 # === XÓA CONTAINER CŨ ===
 echo "> Dừng & xoá container cũ..."
