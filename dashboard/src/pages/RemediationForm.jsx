@@ -180,6 +180,15 @@ export default function RemediationForm() {
           os_type: latestAudit.os_type
         }))
       }
+
+      // Auto-fill container_name từ audit nếu là container audit
+      if (latestAudit.container && !formData.container_name) {
+        console.log(`🔄 Auto-detected container name from audit: ${latestAudit.container}`)
+        setFormData(prev => ({
+          ...prev,
+          container_name: latestAudit.container
+        }))
+      }
       
       // Filter failed rules AND filter by OS type
       const allResults = latestAudit.results || []
@@ -187,14 +196,20 @@ export default function RemediationForm() {
       
       const failed = allResults.filter(r => {
         const status = (r.status || '').toUpperCase()
+        // CHỈ lấy FAILED - không lấy PASS
         const isFailed = (
           status === 'FAIL' || 
           status === 'ERROR' || 
           (r.exit_status !== undefined && r.exit_status !== 0 && status !== 'PASS' && status !== 'SKIPPED')
         )
         
-        // Also filter by OS type
-        const matchesOS = isRuleForOS(r.id, auditOSType)
+        // For container, check if rule ID starts with container-
+        let matchesOS = false
+        if (auditOSType?.startsWith('container-')) {
+          matchesOS = r.id?.startsWith('container-') || false
+        } else {
+          matchesOS = isRuleForOS(r.id, auditOSType)
+        }
         
         if (isFailed) {
           console.log(`  Rule ${r.id}: status=${status}, matchesOS=${matchesOS}, will include=${isFailed && matchesOS}`)
@@ -270,7 +285,9 @@ export default function RemediationForm() {
   }
 
   const getFilteredRules = () => {
-    const rulesToShow = failedRules.length > 0 ? failedRules : availableRules
+    // CHỈ hiển thị failed rules - không hiển thị availableRules nếu đã có failedRules
+    // Nếu không có failed rules, trả về mảng rỗng (không hiển thị passed rules)
+    const rulesToShow = failedRules.length > 0 ? failedRules : []
     if (!searchTerm) return rulesToShow
     return rulesToShow.filter(rule => {
       const searchLower = searchTerm.toLowerCase()
@@ -535,6 +552,7 @@ export default function RemediationForm() {
   const isLinux = formData.os_type?.startsWith('ubuntu') || 
                   formData.os_type?.startsWith('debian')
   const isContainer = formData.os_type?.startsWith('container-')
+  const isWindows = formData.os_type?.startsWith('windows-')
 
   return (
     <div className="remediation-form-page">
@@ -765,9 +783,9 @@ export default function RemediationForm() {
             </>
           )}
 
-          {!isLinux && (
+          {(isWindows || isContainer) && (
             <>
-              {/* Show failed rules for Windows - same as Linux with selection */}
+              {/* Show failed rules for Windows/Container - same as Linux with selection */}
               <div className="form-section">
                 <h2>Select Rules to Fix *</h2>
                 
@@ -878,34 +896,95 @@ export default function RemediationForm() {
                 )}
               </div>
 
-            <div className="form-section">
-              <h2>Windows Connection</h2>
-              
-              <div className="form-group">
-                <label htmlFor="username">Username</label>
-                <input
-                  id="username"
-                  name="username"
-                  type="text"
-                  value={formData.username}
-                  onChange={handleChange}
-                  placeholder="Administrator"
-                />
-              </div>
+              {isWindows && (
+                <div className="form-section">
+                  <h2>Windows Connection</h2>
+                  
+                  <div className="form-group">
+                    <label htmlFor="username">Username</label>
+                    <input
+                      id="username"
+                      name="username"
+                      type="text"
+                      value={formData.username}
+                      onChange={handleChange}
+                      placeholder="Administrator"
+                    />
+                  </div>
 
-              <div className="form-group">
-                <label htmlFor="password">Password *</label>
-                <input
-                  id="password"
-                  name="password"
-                  type="password"
-                  value={formData.password}
-                  onChange={handleChange}
-                  placeholder="Windows password"
-                  required
-                />
-              </div>
-            </div>
+                  <div className="form-group">
+                    <label htmlFor="password">Password *</label>
+                    <input
+                      id="password"
+                      name="password"
+                      type="password"
+                      value={formData.password}
+                      onChange={handleChange}
+                      placeholder="Windows password"
+                      required
+                    />
+                  </div>
+                </div>
+              )}
+
+              {isContainer && (
+                <div className="form-section">
+                  <h2>Container Connection (SSH to Docker Host)</h2>
+                  
+                  <div className="form-group">
+                    <label htmlFor="username">SSH Username *</label>
+                    <input
+                      id="username"
+                      name="username"
+                      type="text"
+                      value={formData.username}
+                      onChange={handleChange}
+                      placeholder="SSH user trên host (ví dụ client)"
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label htmlFor="password">SSH Password *</label>
+                    <input
+                      id="password"
+                      name="password"
+                      type="password"
+                      value={formData.password}
+                      onChange={handleChange}
+                      placeholder="SSH password cho host"
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group checkbox-group">
+                    <label>
+                      <input
+                        type="checkbox"
+                        name="use_sudo"
+                        checked={formData.use_sudo}
+                        onChange={handleChange}
+                      />
+                      Use sudo trên host để chạy docker (nếu user không thuộc group docker)
+                    </label>
+                  </div>
+
+                  {formData.use_sudo && (
+                    <div className="form-group">
+                      <label htmlFor="sudo_password">Sudo Password *</label>
+                      <input
+                        id="sudo_password"
+                        name="sudo_password"
+                        type="password"
+                        value={formData.sudo_password}
+                        onChange={handleChange}
+                        placeholder="Sudo password cho host"
+                        required={formData.use_sudo}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           )}
 
