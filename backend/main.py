@@ -944,15 +944,22 @@ async def remediate_container(
 
         print(f"✅ Script loaded ({len(script_content)} bytes)")
 
-        docker_script = f"docker exec -i {Container_name} sh <<'EOF'\n{script_content}\nEOF\n"
+        # Container remediation scripts chạy trên HOST (không phải trong container)
+        # Vì cần restart container với flags mới
+        # Script sẽ nhận CONTAINER_NAME như environment variable
+        host_script = f"""
+export CONTAINER_NAME="{Container_name}"
 
-        # Thực thi script (timeout 2 phút)
-        print(f"🚀 Executing remediation script on container {Container_name}...")
+{script_content}
+"""
+
+        # Thực thi script trên HOST (timeout 2 phút)
+        print(f"🚀 Executing container remediation script on HOST {Host} (will restart container {Container_name} if needed)...")
         ssh_exec = ssh_connect(Host, Username, Key_path or "", password=Password)
         try:
             exec_result = run_bash_check_stdin(
                 ssh_exec,
-                docker_script,
+                host_script,
                 use_sudo=Use_sudo_host,
                 sudo_password=Sudo_password_host,
                 timeout=120,
