@@ -15,10 +15,16 @@ export default function Remediations() {
   const [showClearDataModal, setShowClearDataModal] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [expandedIds, setExpandedIds] = useState(new Set())
+  const [renderError, setRenderError] = useState(null)
 
   useEffect(() => {
-    console.log('Remediations page - userRole:', userRole, 'isAdmin:', userRole === 'admin', 'type:', typeof userRole)
-    loadRemediations()
+    try {
+      console.log('Remediations page - userRole:', userRole, 'isAdmin:', userRole === 'admin', 'type:', typeof userRole)
+      loadRemediations()
+    } catch (err) {
+      console.error('Error in Remediations useEffect:', err)
+      setRenderError(err.message)
+    }
   }, [userRole])
 
   const loadRemediations = async () => {
@@ -150,6 +156,21 @@ export default function Remediations() {
     )
   }
 
+  // Error boundary - nếu có lỗi render, hiển thị error message
+  if (renderError) {
+    return (
+      <div className="remediations-page" style={{ padding: '40px' }}>
+        <div style={{ background: '#fee', border: '2px solid red', padding: '20px', borderRadius: '8px' }}>
+          <h2>Error Loading Remediations Page</h2>
+          <p>{renderError}</p>
+          <button onClick={() => { setRenderError(null); loadRemediations(); }} style={{ marginTop: '10px', padding: '8px 16px' }}>
+            Retry
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="remediations-page">
       <div className="page-header">
@@ -205,24 +226,20 @@ export default function Remediations() {
         </div>
       )}
       
-      {!error && remediations.length === 0 && !loading && (
-        <div style={{ padding: '40px', textAlign: 'center', color: '#666' }}>
-          <p>No remediations found.</p>
-          <button onClick={loadRemediations} style={{ marginTop: '10px', padding: '8px 16px' }}>
-            Refresh
-          </button>
-        </div>
-      )}
-
-      {remediations.length === 0 ? (
-        <div className="empty-state">
-          <Wrench size={48} />
-          <h2>No remediation logs found</h2>
-          <p>Remediation actions will appear here</p>
-        </div>
-      ) : (
+      {!error && !loading && (
         <>
-          <div className="bulk-actions">
+          {Array.isArray(remediations) && remediations.length === 0 ? (
+            <div className="empty-state">
+              <Wrench size={48} />
+              <h2>No remediation logs found</h2>
+              <p>Remediation actions will appear here</p>
+              <button onClick={loadRemediations} style={{ marginTop: '20px', padding: '8px 16px' }}>
+                Refresh
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="bulk-actions">
             <label className="select-all-checkbox">
               <input
                 type="checkbox"
@@ -457,6 +474,8 @@ export default function Remediations() {
               }
             })}
           </div>
+            </>
+          )}
         </>
       )}
 
