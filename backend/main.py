@@ -2159,15 +2159,30 @@ async def get_remediation_reports(
         total = db.count_remediation_logs(host=host)
         remediations = db.get_remediation_logs(host=host, limit=limit)
         
+        # Convert ObjectId to string và đảm bảo format đúng
         for remediation in remediations:
-            remediation["id"] = str(remediation["_id"])
-            del remediation["_id"]
-            
+            if "_id" in remediation:
+                remediation["id"] = str(remediation["_id"])
+                del remediation["_id"]
+            # Đảm bảo có các field cần thiết
+            if "remediation_id" not in remediation and "id" in remediation:
+                remediation["remediation_id"] = remediation["id"]
+            # Đảm bảo output và error fields tồn tại (fallback từ script_output/script_error)
+            if "output" not in remediation and "script_output" in remediation:
+                remediation["output"] = remediation["script_output"]
+            if "error" not in remediation and "script_error" in remediation:
+                remediation["error"] = remediation["script_error"]
+        
+        print(f"📊 GET /reports/remediations - Returning {len(remediations)} remediations (total: {total})")
+        
         return {
             "total": total,
             "remediations": remediations
         }
     except Exception as e:
+        print(f"❌ Error in get_remediation_reports: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 class BulkDeleteRequest(BaseModel):
