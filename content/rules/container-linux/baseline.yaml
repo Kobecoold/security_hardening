@@ -1,0 +1,31 @@
+id: container-linux-1.1
+os: container-linux
+title: Ensure container not running as root user
+benchmark: Container Baseline
+level: 1
+description: Ensure the primary user inside the container is not UID 0.
+needs_sudo: false
+check:
+  bash: |
+    if [ "$(id -u)" -eq 0 ]; then
+      echo "Container is running as root (UID 0)"
+      exit 1
+    fi
+    echo "Container running as non-root user"
+    exit 0
+
+---
+id: container-linux-1.2
+os: container-linux
+title: Ensure /tmp is mounted noexec/nosuid/nodev (container)
+benchmark: Container Baseline
+level: 1
+description: Verify tmp mount options inside container to reduce execution surface.
+needs_sudo: false
+check:
+  bash: |
+    mount | awk '$3=="/tmp"{print $0}' | grep -q "noexec" || { echo "/tmp missing noexec"; exit 1; }
+    mount | awk '$3=="/tmp"{print $0}' | grep -q "nosuid" || { echo "/tmp missing nosuid"; exit 1; }
+    mount | awk '$3=="/tmp"{print $0}' | grep -q "nodev"  || { echo "/tmp missing nodev";  exit 1; }
+    echo "/tmp has noexec,nosuid,nodev"
+    exit 0

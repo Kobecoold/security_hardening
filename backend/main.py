@@ -14,6 +14,7 @@ import time
 import traceback
 import os
 from datetime import datetime
+import re
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -204,7 +205,8 @@ async def root_api_info():
             },
             "audit": {
                 "linux": "/audit/linux",
-                "windows": "/audit/windows"
+                "windows": "/audit/windows",
+                "container": "/audit/container"
             },
             "remediation": {
                 "linux": "/remediate/linux",
@@ -628,6 +630,249 @@ async def audit_linux_json(
         raise
     except Exception as e:
         error_msg = f"Linux audit failed: {str(e)}"
+        print(f"❌ {error_msg}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=error_msg)
+
+@app.post("/audit/container", dependencies=[RequireAdmin])
+async def audit_container_docker_exec(
+    Host: str = Form(...),
+    Username: str = Form(""),
+    Container_name: str = Form(...),
+    Key_path: Optional[str] = Form("~/.ssh/id_ed25519"),
+    Password: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+    Use_sudo_host: bool = Form(False),
+    Sudo_password_host: Optional[str] = Form(None, json_schema_extra={"format": "password"}),
+):
+    """
+    Audit container thông qua docker exec trên host Linux (SSH vào host, không cần SSH trong container).
+    """
+    try:
+        if not Host or not Host.strip():
+            raise HTTPException(status_code=400, detail="Host is required")
+        if not Username or not Username.strip():
+            raise HTTPException(status_code=400, detail="Username is required. Please provide a valid username (not empty).")
+        if not Container_name or not Container_name.strip():
+            raise HTTPException(status_code=400, detail="Container_name is required")
+
+        Host = Host.strip()
+        Username = Username.strip()
+        Container_name = Container_name.strip()
+
+        name_pattern = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
+        if not name_pattern.match(Container_name):
+            raise HTTPException(status_code=400, detail="Invalid container name. Only letters, numbers, . _ - are allowed.")
+
+        # Kết nối host và kiểm tra container tồn tại
+        try:
+            ssh = ssh_connect(Host, Username, Key_path or "", password=Password)
+            try:
+                check_cmd = f"docker inspect {Container_name} >/dev/null 2>&1"
+                exists = run_bash_check_stdin(
+                    ssh,
+                    check_cmd,
+                    use_sudo=Use_sudo_host,
+                    sudo_password=Sudo_password_host,
+                    timeout=15,
+                )
+                if exists.get("exit_status") != 0:
+                    raise HTTPException(status_code=400, detail=f"Container '{Container_name}' not found on host {Host}")
+
+                inspect_cmd = (
+                    f"docker inspect --format '{{{{.Id}}}}|{{{{.Config.Image}}}}|{{{{.Config.User}}}}|{{{{.State.Running}}}}' {Container_name}"
+                )
+                inspect_res = run_bash_check_stdin(
+                    ssh,
+                    inspect_cmd,
+                    use_sudo=Use_sudo_host,
+                    sudo_password=Sudo_password_host,
+                    timeout=15,
+                )
+                container_info = {
+                    "id": None,
+                    "image": None,
+                    "user": None,
+                    "running": None,
+                }
+                if inspect_res.get("exit_status") == 0:
+                    parts = inspect_res.get("stdout", "").strip().split("|")
+                    if len(parts) >= 4:
+                        container_info = {
+                            "id": parts[0],
+                            "image": parts[1],
+                            "user": parts[2] or "root (default)",
+                            "running": parts[3],
+                        }
+            finally:
+                try:
+                    ssh.close()
+                except Exception:
+                    pass
+        except HTTPException:
+            raise
+        except Exception as ssh_error:
+            raise HTTPException(status_code=400, detail=f"SSH connection failed: {ssh_error}")
+
+        # Load rules cho container
+        try:
+            rules = load_rules_by_os("container-linux")
+        except Exception as rules_error:
+            raise HTTPException(status_code=500, detail=f"Failed to load container rules: {rules_error}")
+
+        if not rules:
+            return {
+                "client_type": "container",
+                "host": Host,
+                "container": Container_name,
+                "os": "container-linux",
+                "total_rules": 0,
+                "results": [],
+            }
+
+        results: List[Dict] = []
+        start_overall = time.time()
+
+        def wrap_in_docker_exec(script_text: str) -> str:
+            """Wrap rule script để chạy trong container qua docker exec."""
+            return f"docker exec -i {Container_name} sh <<'EOF'\n{script_text}\nEOF\n"
+
+        def run_one(rule: Dict, rule_index: int, total_rules: int) -> Dict:
+            rule_id = rule.get("id", "unknown")
+            rule_title = rule.get("title", "Unknown")
+
+            print(f"  [{rule_index}/{total_rules}] Checking (container): {rule_id} - {rule_title}")
+
+            check = rule.get("check", {}) if isinstance(rule, dict) else {}
+            script_text = check.get("bash") if isinstance(check, dict) else None
+            if not script_text:
+                print(f"    ⚠️ Skipped: no check.bash")
+                return {"id": rule_id, "title": rule_title, "status": "SKIPPED", "reason": "no check.bash"}
+
+            started = time.time()
+            try:
+                ssh_local = ssh_connect(Host, Username, Key_path or "", password=Password)
+                try:
+                    docker_script = wrap_in_docker_exec(script_text)
+                    exec_result = run_bash_check_stdin(
+                        ssh_local,
+                        docker_script,
+                        use_sudo=Use_sudo_host,
+                        sudo_password=Sudo_password_host,
+                        timeout=30,
+                    )
+                finally:
+                    try:
+                        ssh_local.close()
+                    except Exception:
+                        pass
+
+                duration_ms = int((time.time() - started) * 1000)
+
+                if exec_result.get("status") == "TIMEOUT":
+                    print(f"    ⚠️ TIMEOUT after 30s")
+                elif exec_result.get("exit_status") == 0:
+                    print(f"    ✅ PASS ({duration_ms}ms)")
+                else:
+                    print(f"    ❌ FAIL ({duration_ms}ms)")
+                    if exec_result.get("stdout"):
+                        print(f"       stdout: {exec_result['stdout'][:200]}")
+                    if exec_result.get("stderr"):
+                        print(f"       stderr: {exec_result['stderr'][:200]}")
+
+                tout_dict = truncate_output(exec_result.get("stdout"))
+                terr_dict = truncate_output(exec_result.get("stderr"))
+
+                return {
+                    "id": rule_id,
+                    "title": rule_title,
+                    "os": "container-linux",
+                    "benchmark": rule.get("benchmark"),
+                    "needs_sudo": Use_sudo_host,
+                    "exit_status": exec_result.get("exit_status"),
+                    "status": exec_result.get("status"),
+                    "stdout": tout_dict.get("text", ""),
+                    "stdout_truncated": tout_dict.get("truncated", False),
+                    "stdout_sha256": tout_dict.get("sha256"),
+                    "stderr": terr_dict.get("text", ""),
+                    "stderr_truncated": terr_dict.get("truncated", False),
+                    "stderr_sha256": terr_dict.get("sha256"),
+                    "duration_ms": duration_ms,
+                    "started_at": int(started * 1000),
+                }
+            except Exception as rule_error:
+                print(f"    ❌ ERROR: {str(rule_error)[:100]}")
+                return {
+                    "id": rule_id,
+                    "title": rule_title,
+                    "status": "ERROR",
+                    "error": str(rule_error),
+                    "duration_ms": int((time.time() - started) * 1000),
+                }
+
+        print(f"🚀 Running {len(rules)} audit checks on container {Container_name} via host {Host}...")
+
+        for i, rule in enumerate(rules, 1):
+            try:
+                results.append(run_one(rule, i, len(rules)))
+            except Exception as e:
+                print(f"  ❌ Fatal error on rule {i}: {e}")
+                results.append({
+                    "id": rule.get("id", "unknown"),
+                    "title": rule.get("title", "Unknown"),
+                    "status": "ERROR",
+                    "error": str(e)
+                })
+
+        # Lấy thông tin host (Linux) để lưu kèm
+        ssh_info = ssh_connect(Host, Username, Key_path or "", password=Password)
+        try:
+            host_info = get_linux_host_info(ssh_info)
+        finally:
+            ssh_info.close()
+
+        audit_data = {
+            "host": Host,
+            "container": Container_name,
+            "os_type": "container-linux",
+            "client_type": "container",
+            "protocol": "docker-exec",
+            "benchmark": rules[0].get("benchmark", "Container Baseline") if rules else "Unknown",
+            "total_rules": len(results),
+            "results": results,
+            "connection_info": {
+                "host": host_info,
+                "container": container_info,
+            },
+            "duration_ms": int((time.time() - start_overall) * 1000)
+        }
+
+        try:
+            print("💾 Saving container audit results to MongoDB...")
+            audit_id = db.save_audit_report(audit_data)
+            print(f"✅ Audit saved to MongoDB: {audit_id}")
+        except Exception as db_error:
+            print(f"⚠️ MongoDB save failed (non-critical): {db_error}")
+            audit_id = None
+
+        return {
+            "audit_id": audit_id,
+            "client_type": "container",
+            "protocol": "docker-exec",
+            "host": Host,
+            "container": Container_name,
+            "os": "container-linux",
+            "benchmark": audit_data["benchmark"],
+            "total_rules": len(results),
+            "compliance_score": audit_data.get("compliance_score", 0),
+            "duration_ms": audit_data["duration_ms"],
+            "connection_info": audit_data["connection_info"],
+            "results": results
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = f"Container audit failed: {str(e)}"
         print(f"❌ {error_msg}")
         import traceback
         traceback.print_exc()
